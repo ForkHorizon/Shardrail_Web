@@ -172,9 +172,9 @@ Answer with evidence (commands, excerpts, version):
 - Acceptance: the interface is approved, with no Codex-specific leakage into the shared layer. (Details: `docs/tasks/T2.2-agent-adapter-interface.md`)
 
 **T2.3 Codex: session list**
-- [D] Adapter: all sessions on the machine (from CLI and app), metadata (id, working directory, title, time, model, state).
-- [T] Fixtures from real records of several Codex versions; test for a corrupted/partly written file; live test on the test repository.
-- Acceptance: the list matches what Codex itself shows.
+- [x] [D] Adapter: all sessions on the machine (from CLI and app), metadata (id, working directory, title, time, model, state).
+- [x] [T] Fixtures from real records of several Codex versions; test for a corrupted/partly written file; live test on the test repository.
+- Acceptance: the list matches what Codex itself shows. (Details: `docs/tasks/T2.3-codex-session-list.md`)
 
 **T2.4 Codex: full history**
 - [D] Paged reading of all messages/events, including tool calls, diffs, command outputs, with no loss and no duplicates. Large sessions are not loaded whole.
