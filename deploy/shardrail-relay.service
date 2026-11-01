@@ -11,6 +11,9 @@ EnvironmentFile=-/etc/default/shardrail-relay
 ExecStart=/usr/local/bin/shardrail-relay --listen 127.0.0.1:4000
 Restart=always
 RestartSec=3s
+StandardOutput=append:/var/log/shardrail/relay.log
+StandardError=append:/var/log/shardrail/relay.log
+ReadWritePaths=/var/log/shardrail
 
 # Hardening
 NoNewPrivileges=true

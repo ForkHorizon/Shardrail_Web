@@ -43,8 +43,14 @@ Static SPA files are generated in `apps/web/dist/`.
    sudo cp target/release/shardrail-relay /usr/local/bin/shardrail-relay
    sudo chmod +x /usr/local/bin/shardrail-relay
    ```
-3. Install configuration and systemd service:
+3. Install configuration, log directory, and systemd service:
    ```bash
+   sudo mkdir -p /var/log/shardrail
+   sudo chown -R shardrail:shardrail /var/log/shardrail
+   sudo chmod 750 /var/log/shardrail
+   sudo cp deploy/logrotate-shardrail.conf /etc/logrotate.d/shardrail
+   sudo chmod 644 /etc/logrotate.d/shardrail
+
    sudo cp deploy/shardrail-relay.service /etc/systemd/system/shardrail-relay.service
    sudo mkdir -p /etc/default
    echo 'SHARDRAIL_RELAY_LISTEN=127.0.0.1:4000' | sudo tee /etc/default/shardrail-relay
@@ -78,7 +84,46 @@ sudo chown -R www-data:www-data /opt/shardrail/dist
 
 ---
 
-## 3. Connecting Developer Daemons
+## 3. Log Rotation
+
+File logs are emitted to `/var/log/shardrail/relay.log`. Log rotation is configured via `/etc/logrotate.d/shardrail`:
+- **Frequency**: Daily
+- **Retention**: 14 rotated archives
+- **Compression**: gzip (`delaycompress`)
+- **Mode**: `copytruncate` to safely truncate in place without requiring process restart or file descriptor reacquisition
+- **Permissions**: `0640 shardrail shardrail`
+
+---
+
+## 4. Zero-Downtime Update Procedure
+
+To update the relay binary or web console with seamless recovery for connected daemons and browsers:
+
+```bash
+sudo ./deploy/update-relay.sh
+```
+
+**Procedure Mechanics**:
+1. Builds release binary and static SPA bundle.
+2. Verifies the newly compiled `shardrail-relay --version` before replacing production binaries.
+3. Performs atomic replacement of `/usr/local/bin/shardrail-relay` via staging tempfile.
+4. Restarts `shardrail-relay.service` (~15ms restart window).
+5. Daemons detect socket closure and automatically reconnect via exponential backoff (1s - 30s) and resume normal heartbeat without restarting running sessions.
+6. Connected browsers re-establish WebSocket connections, replay cursors, and resume streaming.
+7. Synces static web console files to `/opt/shardrail/dist` and reloads Nginx.
+
+---
+
+## 5. Hub Threat Model & Revocation Guarantees
+
+- **D67 Outbound Only**: Daemons initiate outbound-only connections to the relay (`wss://shardrail.forkhorizon.com/ws`). The server never requires ingress into the developer workstation.
+- **D69 Untrusted Relay**: All application frames, session commands, approval resolutions, and logs are encrypted end-to-end between client and daemon. The relay operates strictly as an untrusted blind pipe.
+- **D70 Envelope Routing**: The relay inspects only envelope routing metadata (`machine_id`, `client_id`, message type).
+- **Client Revocation (CloseCode 4003)**: When a device is revoked (`shardraild client remove <pubkey>`), the daemon emits a `control:revoke_client` message to the relay. The relay purges the client from the routing tables and immediately sends a WebSocket `CloseFrame` (code `4003`, reason `"Client Revoked"`), severing any active connection instantly.
+
+---
+
+## 6. Connecting Developer Daemons
 
 On the developer machine, launch `shardraild` with the outbound relay dialer enabled:
 
@@ -92,7 +137,7 @@ shardraild start \
 
 ---
 
-## 4. Connecting from Any Browser
+## 7. Connecting from Any Browser
 
 Open the browser to the hosted web console:
 

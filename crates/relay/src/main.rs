@@ -5,6 +5,7 @@ use std::net::SocketAddr;
 #[derive(Debug, Parser)]
 #[command(
     name = "shardrail-relay",
+    version,
     about = "Self-hosted E2EE WebSocket Relay for Shardrail (D67/D69/D70)"
 )]
 struct Args {

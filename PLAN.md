@@ -143,10 +143,10 @@ Stage gate: all tasks of the stage accepted by the owner; CI green in every touc
 - Acceptance: a new machine is added from short instructions in minutes and appears in the UI. (Details: `docs/tasks/T1.2-core-install.md`)
 
 **T1.3 Relay and web console on the server**
-- [R] Current configuration (`deploy/`: nginx, systemd), TLS, domain, what production requires; hub threat model (archive D67/D69/D70).
-- [D] Production deployment, autostart, log rotation, zero-downtime update procedure.
-- [T] Checks: daemon connection loss, relay restart, several machines at once, several browsers, revoking a paired device.
-- Acceptance: M5, M1 and the server are visible on the web from any browser; device revocation works.
+- [x] [R] Current configuration (`deploy/`: nginx, systemd), TLS, domain, what production requires; hub threat model (archive D67/D69/D70).
+- [x] [D] Production deployment, autostart, log rotation, zero-downtime update procedure.
+- [x] [T] Checks: daemon connection loss, relay restart, several machines at once, several browsers, revoking a paired device.
+- [x] Acceptance: M5, M1 and the server are visible on the web from any browser; device revocation works. (Details: `docs/tasks/T1.3-relay-server.md`)
 
 ---
 
