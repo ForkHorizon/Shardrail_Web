@@ -177,9 +177,9 @@ Answer with evidence (commands, excerpts, version):
 - Acceptance: the list matches what Codex itself shows. (Details: `docs/tasks/T2.3-codex-session-list.md`)
 
 **T2.4 Codex: full history**
-- [D] Paged reading of all messages/events, including tool calls, diffs, command outputs, with no loss and no duplicates. Large sessions are not loaded whole.
-- [T] Compare with the source (counts, checksums), a session of thousands of records, unusual characters.
-- Acceptance: the UI shows the same messages as Codex, in the same order.
+- [x] [D] Paged reading of all messages/events, including tool calls, diffs, command outputs, with no loss and no duplicates. Large sessions are not loaded whole.
+- [x] [T] Compare with the source (counts, checksums), a session of thousands of records, unusual characters.
+- Acceptance: the UI shows the same messages as Codex, in the same order. (Details: `docs/tasks/T2.4-codex-full-history.md`)
 
 **T2.5 Codex: live sync**
 - [D] New events from a session that the CLI or the app is writing to appear in Shardrail in real time; cursors, de-duplication, recovery after a break.
