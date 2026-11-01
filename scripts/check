@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+gates_sha="f3b7ff08924b5e262d0f6df0cdb43d8b18ba1969"
+gates_root="${CI_SCOPE_GATES:-${HOME}/.ci-scope/gates}"
+if [[ ! -x "$gates_root/scripts/check" && -z "${CI_SCOPE_GATES:-}" ]]; then
+  mkdir -p "$(dirname "$gates_root")"
+  { gh repo clone ForkHorizon/ci-gates "$gates_root" -- --quiet || git clone --quiet https://github.com/ForkHorizon/ci-gates "$gates_root"; } >&2 || true
+  git -C "$gates_root" checkout --quiet "$gates_sha" >&2 || true
+fi
+if [[ ! -x "$gates_root/scripts/check" ]]; then
+  echo "ci-gates is missing at $gates_root. Run: git clone https://github.com/ForkHorizon/ci-gates \"$gates_root\" && git -C \"$gates_root\" checkout f3b7ff08924b5e262d0f6df0cdb43d8b18ba1969" >&2
+  exit 2
+fi
+actual_sha="$(git -C "$gates_root" rev-parse HEAD)"
+if [[ "$actual_sha" != "$gates_sha" ]]; then
+  echo "ci-gates SHA mismatch: expected $gates_sha, found $actual_sha." >&2
+  exit 2
+fi
+if ! gates_status="$(git -C "$gates_root" status --porcelain --untracked-files=all)"; then
+  echo "Unable to verify ci-gates checkout status." >&2
+  exit 2
+fi
+if [[ -n "$gates_status" ]]; then
+  echo "ci-gates checkout has local changes; refusing to run unpinned code." >&2
+  exit 2
+fi
+CI_SCOPE_GATES="$gates_root" exec "$gates_root/scripts/check" "$@"

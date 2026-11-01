@@ -1,0 +1,36 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "scripts/check guard-tests # ci-scope-agent-toolkit"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "output=$(scripts/check 2>&1); status=$?; if [ \"$status\" -ne 0 ]; then printf '%s\\n' \"$output\" >&2; exit 2; fi # ci-scope-agent-toolkit"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if cat | grep -Eq '\"stop_hook_active\": *true'; then exit 0; fi; output=$(scripts/check 2>&1); status=$?; if [ \"$status\" -ne 0 ]; then printf '%s\\n' \"$output\" >&2; exit 2; fi # ci-scope-agent-toolkit"
+          }
+        ]
+      }
+    ]
+  }
+}
