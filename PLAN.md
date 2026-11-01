@@ -182,9 +182,9 @@ Answer with evidence (commands, excerpts, version):
 - Acceptance: the UI shows the same messages as Codex, in the same order. (Details: `docs/tasks/T2.4-codex-full-history.md`)
 
 **T2.5 Codex: live sync**
-- [D] New events from a session that the CLI or the app is writing to appear in Shardrail in real time; cursors, de-duplication, recovery after a break.
-- [T] Scenarios: write from CLI → watch on web; write from app → watch on web; daemon restart in the middle; delay/loss of connection.
-- Acceptance: latency and integrity are measured and recorded; no loss, no duplicates.
+- [x] [D] New events from a session that the CLI or the app is writing to appear in Shardrail in real time; cursors, de-duplication, recovery after a break.
+- [x] [T] Scenarios: write from CLI → watch on web; write from app → watch on web; daemon restart in the middle; delay/loss of connection.
+- Acceptance: latency and integrity are measured and recorded; no loss, no duplicates. (Details: `docs/tasks/T2.5-codex-live-sync.md`)
 
 **T2.6 UI: Machines → Agents → Sessions → Messages (Codex)**
 - [D] Navigation across the hierarchy, session search/filters, message rendering (markdown, diffs, commands) in a safe mode (untrusted output).
