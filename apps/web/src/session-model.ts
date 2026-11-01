@@ -14,6 +14,10 @@ export type SessionSummary = {
   status: string;
   lastActivityMs: number;
   lastCursor: number;
+  workdir?: string | null;
+  model?: string | null;
+  turnCount?: number;
+  machineId?: string | null;
 };
 
 export type ApprovalCard = {
@@ -55,6 +59,35 @@ export type VerificationCheck = {
   lastChecked: string | null;
 };
 
+export type DiffData = {
+  path: string;
+  action: 'created' | 'modified' | 'deleted' | string;
+  diff: string;
+};
+
+export type CommandData = {
+  command: string;
+  cwd?: string | null;
+  exitCode?: number | null;
+  stdout?: string | null;
+  stderr?: string | null;
+  status?: string | null;
+};
+
+export type ReasoningData = {
+  summary?: string | null;
+  content: string;
+  durationMs?: number | null;
+};
+
+export type ToolCallData = {
+  toolName: string;
+  callId?: string | null;
+  arguments?: unknown;
+  output?: string | null;
+  isError?: boolean;
+};
+
 export type TranscriptItem = {
   key: string;
   kind: string;
@@ -63,10 +96,15 @@ export type TranscriptItem = {
   markdown: string | null;
   plain: string | null;
   rawEvents: string[];
-  presentation: 'message' | 'approval' | 'tool' | 'lifecycle' | 'raw';
+  presentation: 'message' | 'approval' | 'tool' | 'lifecycle' | 'raw' | 'diff' | 'command' | 'reasoning';
   summary: string | null;
   status: string | null;
   approvalId: string | null;
+  diffData?: DiffData | null;
+  commandData?: CommandData | null;
+  reasoningData?: ReasoningData | null;
+  toolCallData?: ToolCallData | null;
+  role?: 'user' | 'assistant' | 'system' | null;
 };
 
 export type ApprovalFlight = { inFlight: ReadonlySet<string>; error: string | null };
@@ -204,6 +242,8 @@ export function sessionSummaries(events: readonly JournalEvent[]): SessionSummar
     const payload = asRecord(event.payload);
     if (event.kind === 'process_started' && typeof payload?.provider === 'string' && payload.provider.length > 0) {
       summary.agentKind = payload.provider;
+    } else if (typeof payload?.agent_kind === 'string' && payload.agent_kind.length > 0) {
+      summary.agentKind = payload.agent_kind;
     }
     const snapshot = asRecord(payload?.session_snapshot);
     if (snapshot) {
@@ -214,6 +254,20 @@ export function sessionSummaries(events: readonly JournalEvent[]): SessionSummar
     } else if (event.kind === 'session_created' && summary.lifecycle === 'unknown') {
       summary.lifecycle = 'open';
       summary.status = formatStatus(summary.lifecycle, null, null);
+    }
+    if (typeof payload?.workdir === 'string' && payload.workdir.length > 0) {
+      summary.workdir = payload.workdir;
+    } else if (typeof payload?.cwd === 'string' && payload.cwd.length > 0) {
+      summary.workdir = payload.cwd;
+    }
+    if (typeof payload?.model === 'string' && payload.model.length > 0) {
+      summary.model = payload.model;
+    }
+    if (typeof payload?.machine_id === 'string' && payload.machine_id.length > 0) {
+      summary.machineId = payload.machine_id;
+    }
+    if (event.kind === 'turn_started') {
+      summary.turnCount = (summary.turnCount ?? 0) + 1;
     }
     byId.set(event.sessionId, summary);
   }
@@ -252,24 +306,127 @@ export function transcriptItems(events: readonly JournalEvent[]): TranscriptItem
       if (Number.isFinite(event.occurredAtMs) && event.occurredAtMs >= last.occurredAtMs) last.occurredAtMs = event.occurredAtMs;
       continue;
     }
+    const pres = transcriptPresentation(event);
+    const payload = asRecord(event.payload);
+    const textMsg = pres.presentation === 'message'
+      ? (typeof payload?.text === 'string' ? payload.text : (typeof payload?.content === 'string' ? payload.content : null))
+      : null;
     items.push({
       key: `${event.kind}-${event.cursor}`,
       kind: event.kind,
       cursorLabel: `#${event.cursor}`,
       occurredAtMs: event.occurredAtMs,
-      markdown: text,
+      markdown: text ?? textMsg,
       plain: plainEventText(event),
       rawEvents: [plainEventText(event)],
-      ...transcriptPresentation(event),
+      ...pres,
     });
   }
   return items;
 }
 
-function transcriptPresentation(event: JournalEvent): Pick<TranscriptItem, 'presentation' | 'summary' | 'status' | 'approvalId'> {
+function transcriptPresentation(event: JournalEvent): Pick<TranscriptItem, 'presentation' | 'summary' | 'status' | 'approvalId' | 'diffData' | 'commandData' | 'reasoningData' | 'toolCallData' | 'role'> {
   const payload = asRecord(event.payload);
   const approvalId = typeof payload?.approval_id === 'string' ? payload.approval_id : null;
-  if (event.kind === 'agent_message_chunk') return { presentation: 'message', summary: null, status: null, approvalId: null };
+
+  if (event.kind === 'file_change' || payload?.kind === 'file_change' || payload?.item_type === 'fileChange') {
+    const path = String(payload?.path ?? '');
+    const action = String(payload?.action ?? 'modified');
+    const diff = typeof payload?.diff === 'string' ? payload.diff : '';
+    return {
+      presentation: 'diff',
+      summary: path || 'File change',
+      status: action,
+      approvalId,
+      diffData: { path, action, diff },
+    };
+  }
+
+  if (event.kind === 'command_execution' || payload?.kind === 'command_execution' || payload?.item_type === 'commandExecution') {
+    const command = String(payload?.command ?? 'Command');
+    const exitCode = typeof payload?.exit_code === 'number' ? payload.exit_code : null;
+    return {
+      presentation: 'command',
+      summary: command,
+      status: exitCode === null ? 'Running' : exitCode === 0 ? 'Success' : `Exit ${exitCode}`,
+      approvalId,
+      commandData: {
+        command,
+        cwd: typeof payload?.cwd === 'string' ? payload.cwd : null,
+        exitCode,
+        stdout: typeof payload?.stdout === 'string' ? payload.stdout : (typeof payload?.output === 'string' ? payload.output : null),
+        stderr: typeof payload?.stderr === 'string' ? payload.stderr : null,
+        status: typeof payload?.status === 'string' ? payload.status : null,
+      },
+    };
+  }
+
+  if (event.kind === 'reasoning' || payload?.kind === 'reasoning' || payload?.item_type === 'reasoning') {
+    const summary = typeof payload?.summary === 'string' ? payload.summary : null;
+    const content = String(payload?.content ?? payload?.text ?? '');
+    return {
+      presentation: 'reasoning',
+      summary: summary ?? 'Reasoning',
+      status: null,
+      approvalId: null,
+      reasoningData: {
+        summary,
+        content,
+        durationMs: typeof payload?.duration_ms === 'number' ? payload.duration_ms : null,
+      },
+    };
+  }
+
+  if (
+    event.kind === 'tool_call' ||
+    payload?.kind === 'tool_call' ||
+    payload?.item_type === 'mcpToolCall' ||
+    payload?.item_type === 'dynamicToolCall' ||
+    payload?.item_type === 'custom_tool_call' ||
+    payload?.item_type === 'collabAgentToolCall'
+  ) {
+    const toolName = String(payload?.tool_name ?? payload?.name ?? 'Tool call');
+    return {
+      presentation: 'tool',
+      summary: toolName,
+      status: 'Executing',
+      approvalId,
+      toolCallData: {
+        toolName,
+        callId: typeof payload?.call_id === 'string' ? payload.call_id : null,
+        arguments: payload?.arguments,
+      },
+    };
+  }
+
+  if (event.kind === 'tool_result' || payload?.kind === 'tool_result') {
+    const isError = Boolean(payload?.is_error);
+    const output = typeof payload?.output === 'string' ? payload.output : null;
+    return {
+      presentation: 'tool',
+      summary: 'Tool result',
+      status: isError ? 'Failed' : 'Completed',
+      approvalId,
+      toolCallData: {
+        toolName: 'Tool result',
+        callId: typeof payload?.call_id === 'string' ? payload.call_id : null,
+        output,
+        isError,
+      },
+    };
+  }
+
+  if (event.kind === 'user_message' || payload?.role === 'user') {
+    return {
+      presentation: 'message',
+      summary: 'User prompt',
+      status: null,
+      approvalId: null,
+      role: 'user',
+    };
+  }
+
+  if (event.kind === 'agent_message_chunk') return { presentation: 'message', summary: null, status: null, approvalId: null, role: 'assistant' };
   if (event.kind === 'approval_requested') return { presentation: 'approval', summary: 'Approval requested', status: 'Pending decision', approvalId };
   if (/^(tool|command)_/.test(event.kind)) {
     const name = [payload?.name, payload?.tool_name, payload?.command]

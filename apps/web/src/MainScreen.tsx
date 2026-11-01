@@ -9,6 +9,7 @@ import { ThemeToggle } from './ui/ThemeToggle';
 import { Icon } from './ui/Icon';
 import { StatusPill } from './ui/StatusPill';
 import { EmptyState } from './ui/EmptyState';
+import { HierarchyNav } from './ui/HierarchyNav';
 
 export function MainScreen({ phase, keyStorage, approvalInFlight, approvalError, promptError, promptClear, workdirs, createError, createPending, createdSessionId, dismissedSessionId, onReconnect, onUnpair, onResolveApproval, onSendPrompt, onInterrupt, onCreateSession }: {
   phase: ConnectionPhase;
@@ -44,13 +45,49 @@ export function MainScreen({ phase, keyStorage, approvalInFlight, approvalError,
   const [pickedWorkdir, setPickedWorkdir] = useState('');
   const [confirmingAllowId, setConfirmingAllowId] = useState<string | null>(null);
   const [mobileDetail, setMobileDetail] = useState(false);
+  const [selectedMachineId, setSelectedMachineId] = useState<string | null>('local');
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+
+  const machines = useMemo(() => [
+    { id: 'local', name: 'Local Machine', isOnline: phase === 'connected', sessionCount: sessions.length }
+  ], [phase, sessions.length]);
+
+  const agents = useMemo(() => {
+    const codexCount = sessions.filter((s) => s.agentKind?.toLowerCase().includes('codex')).length;
+    const claudeCount = sessions.filter((s) => s.agentKind?.toLowerCase().includes('claude')).length;
+    const otherCount = sessions.length - codexCount - claudeCount;
+    const list = [
+      { name: 'codex', label: 'Codex', sessionCount: codexCount },
+      { name: 'claude_code', label: 'Claude Code', sessionCount: claudeCount },
+    ];
+    if (otherCount > 0) {
+      list.push({ name: 'other', label: 'Other', sessionCount: otherCount });
+    }
+    return list;
+  }, [sessions]);
+
+  const agentFilteredSessions = useMemo(() => {
+    if (!selectedAgent) return sessions;
+    if (selectedAgent === 'codex') return sessions.filter((s) => s.agentKind?.toLowerCase().includes('codex'));
+    if (selectedAgent === 'claude_code') return sessions.filter((s) => s.agentKind?.toLowerCase().includes('claude'));
+    return sessions.filter((s) => !s.agentKind?.toLowerCase().includes('codex') && !s.agentKind?.toLowerCase().includes('claude'));
+  }, [sessions, selectedAgent]);
+
   const selected = sessions.find((session) => session.id === selectedId) ?? null;
   const visible = useMemo(() => selected ? eventsForSession(events, selected.id) : [], [events, selected]);
   const items = useMemo(() => transcriptItems(visible), [visible]);
   const approvals = useMemo(() => selected ? approvalsForSession(events, selected.id) : [], [events, selected]);
   const checks = useMemo(() => sessionChecks(events, selected?.id ?? ''), [events, selected]);
   const checklist = useMemo(() => checklistSummary(checks), [checks]);
-  const selectSession = (id: string | null) => { setSelectedId(id); setConfirmingAllowId(null); if (id) setMobileDetail(true); };
+  const selectSession = (id: string | null) => {
+    setSelectedId(id);
+    setConfirmingAllowId(null);
+    if (id) {
+      setMobileDetail(true);
+    } else {
+      setMobileDetail(false);
+    }
+  };
   return <main className="main-screen">
     <header className="app-header">
       <div className="brand"><Icon name="shardrail"/><div><h1>Shardrail</h1><p>Local sessions from the daemon journal</p></div></div>
@@ -65,11 +102,21 @@ export function MainScreen({ phase, keyStorage, approvalInFlight, approvalError,
         </div>
       </div>
     </header>
+    <HierarchyNav
+      machines={machines}
+      selectedMachineId={selectedMachineId}
+      onSelectMachine={setSelectedMachineId}
+      agents={agents}
+      selectedAgent={selectedAgent}
+      onSelectAgent={setSelectedAgent}
+      selectedSessionId={selected?.id ?? null}
+      onClearSession={() => selectSession(null)}
+    />
     <p className="host-banner" role="status">{hostBanner(checks, selected !== null)}</p>
     {keyStorage === 'noble-fallback' ? <p className="inline-note" role="note">This browser stores an extractable private key seed in IndexedDB because non-extractable WebCrypto is unavailable. Same-origin script can read it.</p> : null}
     <div className="workspace">
       <div className={`entry-pane${mobileDetail ? ' mobile-hidden' : ''}`}>
-        <EntryArea sessions={sessions} events={events} selectedId={selected?.id ?? null} workdirs={workdirs} pickedWorkdir={pickedWorkdir} createError={createError} createPending={createPending} phase={phase} onSelect={selectSession} onPickWorkdir={setPickedWorkdir} onCreateSession={onCreateSession}/>
+        <EntryArea sessions={agentFilteredSessions} events={events} selectedId={selected?.id ?? null} workdirs={workdirs} pickedWorkdir={pickedWorkdir} createError={createError} createPending={createPending} phase={phase} onSelect={selectSession} onPickWorkdir={setPickedWorkdir} onCreateSession={onCreateSession}/>
       </div>
       <div className={`detail-pane${mobileDetail ? ' mobile-visible' : ''}`}>
         {selected ? <>
