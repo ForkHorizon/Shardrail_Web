@@ -7,7 +7,6 @@ import {
   inspectBrowserIdentity,
   inspectBrowserIdentityRelay,
   openBrowserKeyStore,
-  type RelayMachineInfo,
 } from '@shardrail/client/browser';
 import type { PairingApi, PairingInfo } from './pairing';
 

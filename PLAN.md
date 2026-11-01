@@ -187,10 +187,10 @@ Answer with evidence (commands, excerpts, version):
 - Acceptance: latency and integrity are measured and recorded; no loss, no duplicates. (Details: `docs/tasks/T2.5-codex-live-sync.md`)
 
 **T2.6 UI: Machines → Agents → Sessions → Messages (Codex)**
-- [D] Navigation across the hierarchy, session search/filters, message rendering (markdown, diffs, commands) in a safe mode (untrusted output).
-- [T] E2E (Playwright), accessibility, large lists.
-- [P] Deploy on the server and check from a phone and a laptop.
-- Acceptance: any Codex session on any connected machine can be reached and read in full.
+- [x] [D] Navigation across the hierarchy, session search/filters, message rendering (markdown, diffs, commands) in a safe mode (untrusted output).
+- [x] [T] E2E (Playwright), accessibility, large lists.
+- [x] [P] Deploy on the server and check from a phone and a laptop.
+- Acceptance: any Codex session on any connected machine can be reached and read in full. (Details: `docs/tasks/T2.6-ui-navigation-and-rendering.md`)
 
 ---
 

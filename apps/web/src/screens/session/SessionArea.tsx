@@ -7,6 +7,10 @@ import { UntrustedMarkdown } from '../../UntrustedMarkdown';
 import { InlineAlert } from '../../ui/InlineAlert';
 import { EmptyState } from '../../ui/EmptyState';
 import { Icon } from '../../ui/Icon';
+import { SafeDiffView } from '../../ui/SafeDiffView';
+import { SafeCommandView } from '../../ui/SafeCommandView';
+import { SafeReasoningView } from '../../ui/SafeReasoningView';
+import { SafeToolView } from '../../ui/SafeToolView';
 
 export function SessionArea({ sessionId, provider, status, connected, items, approvals, checklist, promptError, promptClear, approvalInFlight, approvalError, confirmingAllowId, onConfirmAllow, onResolve, onSendPrompt, onInterrupt }: {
   sessionId: string;
@@ -72,10 +76,95 @@ function SessionEvent({ event }: { event: TranscriptItem }) {
     <span className="lifecycle-meta">{event.cursorLabel}{iso ? <> · <time dateTime={iso}>{new Date(event.occurredAtMs).toLocaleTimeString()}</time></> : null}</span>
     {event.rawEvents.length > 0 ? <Disclosure className="raw-event"><Heading><Button slot="trigger">Raw</Button></Heading><DisclosurePanel>{event.rawEvents.map((raw, index) => <pre key={index}>{raw}</pre>)}</DisclosurePanel></Disclosure> : null}
   </article>;
-  return <article className="event" data-kind={event.kind}>
-    <div className="meta"><b>{event.presentation === 'raw' ? 'Unrecognized event' : event.presentation === 'message' ? 'Agent message' : event.presentation === 'approval' ? 'Approval' : event.presentation === 'tool' ? 'Tool activity' : 'Session update'}</b><span>{event.cursorLabel}</span>{iso ? <time dateTime={iso}>{new Date(event.occurredAtMs).toLocaleTimeString()}</time> : null}</div>
-    {event.markdown !== null ? <div className="body"><p className="untrusted-label">Agent message · untrusted</p><UntrustedMarkdown source={event.markdown}/></div> : event.presentation === 'approval' ? <div className="body event-summary"><b>Approval requested</b><span>Pending decision</span>{event.approvalId ? <Link href={`#approval-${encodeURIComponent(event.approvalId)}`}>View approval card</Link> : null}</div> : event.presentation === 'tool' ? <div className="body event-summary"><b>Tool activity · untrusted action data</b><code>{event.summary}</code><span>{event.status}</span></div> : <p className="body event-raw-preview">{event.plain}</p>}
-    {event.rawEvents.length > 0 ? <Disclosure className="raw-event"><Heading><Button slot="trigger">Raw event{event.rawEvents.length > 1 ? `s (${event.rawEvents.length})` : ''}</Button></Heading><DisclosurePanel>{event.rawEvents.map((raw, index) => <pre key={index}>{raw}</pre>)}</DisclosurePanel></Disclosure> : null}
+
+  const roleLabel = event.role === 'user'
+    ? 'User prompt'
+    : event.presentation === 'message'
+      ? 'Agent message'
+      : event.presentation === 'approval'
+        ? 'Approval'
+        : event.presentation === 'diff'
+          ? 'Diff / File change'
+          : event.presentation === 'command'
+            ? 'Command execution'
+            : event.presentation === 'reasoning'
+              ? 'Reasoning'
+              : event.presentation === 'tool'
+                ? 'Tool activity'
+                : 'Session update';
+
+  return <article className={`event event-${event.presentation}${event.role ? ` role-${event.role}` : ''}`} data-kind={event.kind}>
+    <div className="meta">
+      <b>{roleLabel}</b>
+      <span>{event.cursorLabel}</span>
+      {iso ? <time dateTime={iso}>{new Date(event.occurredAtMs).toLocaleTimeString()}</time> : null}
+    </div>
+
+    {event.presentation === 'diff' && event.diffData ? (
+      <div className="body">
+        <SafeDiffView
+          path={event.diffData.path}
+          action={event.diffData.action}
+          diff={event.diffData.diff}
+        />
+      </div>
+    ) : event.presentation === 'command' && event.commandData ? (
+      <div className="body">
+        <SafeCommandView
+          command={event.commandData.command}
+          cwd={event.commandData.cwd}
+          exitCode={event.commandData.exitCode}
+          stdout={event.commandData.stdout}
+          stderr={event.commandData.stderr}
+          status={event.commandData.status}
+        />
+      </div>
+    ) : event.presentation === 'reasoning' && event.reasoningData ? (
+      <div className="body">
+        <SafeReasoningView
+          summary={event.reasoningData.summary}
+          content={event.reasoningData.content}
+          durationMs={event.reasoningData.durationMs}
+        />
+      </div>
+    ) : event.presentation === 'tool' && event.toolCallData ? (
+      <div className="body">
+        <SafeToolView
+          toolName={event.toolCallData.toolName}
+          callId={event.toolCallData.callId}
+          arguments={event.toolCallData.arguments}
+          output={event.toolCallData.output}
+          isError={event.toolCallData.isError}
+          status={event.status}
+        />
+      </div>
+    ) : event.markdown !== null ? (
+      <div className="body">
+        <p className="untrusted-label">{event.role === 'user' ? 'User input · untrusted' : 'Agent message · untrusted'}</p>
+        <UntrustedMarkdown source={event.markdown}/>
+      </div>
+    ) : event.presentation === 'approval' ? (
+      <div className="body event-summary">
+        <b>Approval requested</b>
+        <span>Pending decision</span>
+        {event.approvalId ? <Link href={`#approval-${encodeURIComponent(event.approvalId)}`}>View approval card</Link> : null}
+      </div>
+    ) : event.presentation === 'tool' ? (
+      <div className="body event-summary">
+        <b>Tool activity · untrusted action data</b>
+        <code>{event.summary}</code>
+        <span>{event.status}</span>
+      </div>
+    ) : (
+      <p className="body event-raw-preview">{event.plain}</p>
+    )}
+
+    {event.rawEvents.length > 0 ? (
+      <Disclosure className="raw-event">
+        <Heading><Button slot="trigger">Raw event{event.rawEvents.length > 1 ? `s (${event.rawEvents.length})` : ''}</Button></Heading>
+        <DisclosurePanel>{event.rawEvents.map((raw, index) => <pre key={index}>{raw}</pre>)}</DisclosurePanel>
+      </Disclosure>
+    ) : null}
   </article>;
 }
 
