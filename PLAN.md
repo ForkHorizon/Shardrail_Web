@@ -165,11 +165,11 @@ Answer with evidence (commands, excerpts, version):
 - Acceptance: the owner approved the recommendation; open risks are listed. (Details: `docs/tasks/T2.1-codex-research.md`)
 
 **T2.2 Agent adapter interface (shared by Codex and Claude Code)**
-- [D] Design from T2.1 (and preliminary Claude Code data from T4.1): list sessions, read history (paged), subscribe to new events, send, interrupt, approvals, session state, adapter capability flags.
-- [D] A normalized message/event model sufficient for both systems; extensible for new agents.
-- [T] Contract tests against a fake adapter.
-- [G] Contracts live in Core (Rust → schema → TS). The drift check is green.
-- Acceptance: the interface is approved, with no Codex-specific leakage into the shared layer.
+- [x] [D] Design from T2.1 (and preliminary Claude Code data from T4.1): list sessions, read history (paged), subscribe to new events, send, interrupt, approvals, session state, adapter capability flags.
+- [x] [D] A normalized message/event model sufficient for both systems; extensible for new agents.
+- [x] [T] Contract tests against a fake adapter.
+- [x] [G] Contracts live in Core (Rust → schema → TS). The drift check is green.
+- Acceptance: the interface is approved, with no Codex-specific leakage into the shared layer. (Details: `docs/tasks/T2.2-agent-adapter-interface.md`)
 
 **T2.3 Codex: session list**
 - [D] Adapter: all sessions on the machine (from CLI and app), metadata (id, working directory, title, time, model, state).
