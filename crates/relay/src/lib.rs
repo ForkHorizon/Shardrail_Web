@@ -312,7 +312,14 @@ impl RelayRuntime {
 
         let count = keys_to_remove.len();
         for key in keys_to_remove {
-            routes.remove(&key);
+            if let Some(conn) = routes.remove(&key) {
+                let _ = conn.tx.send(Message::Close(Some(
+                    tokio_tungstenite::tungstenite::protocol::CloseFrame {
+                        code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::from(4003),
+                        reason: "Client Revoked".into(),
+                    },
+                )));
+            }
         }
         drop(routes);
 
