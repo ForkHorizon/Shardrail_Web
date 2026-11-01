@@ -12,7 +12,7 @@ import { SafeCommandView } from '../../ui/SafeCommandView';
 import { SafeReasoningView } from '../../ui/SafeReasoningView';
 import { SafeToolView } from '../../ui/SafeToolView';
 
-export function SessionArea({ sessionId, provider, status, connected, items, approvals, checklist, promptError, promptClear, approvalInFlight, approvalError, confirmingAllowId, onConfirmAllow, onResolve, onSendPrompt, onInterrupt }: {
+export function SessionArea({ sessionId, provider, status, connected, items, approvals, checklist, promptError, promptClear, approvalInFlight, approvalError, confirmingAllowId, onConfirmAllow, onResolve, onSendPrompt, onInterrupt, onTakeOver }: {
   sessionId: string;
   provider: string | null;
   status: string;
@@ -29,6 +29,7 @@ export function SessionArea({ sessionId, provider, status, connected, items, app
   onResolve: (approvalId: string, optionId: string, binding: ApprovalBindingEcho) => void;
   onSendPrompt: (sessionId: string, prompt: string) => void;
   onInterrupt: (sessionId: string) => void;
+  onTakeOver?: ((sessionId: string) => void) | undefined;
 }) {
   const pendingApproval = approvals.some((card) => card.state === 'pending');
   return <section className="session-detail" aria-labelledby="events-heading">
@@ -38,7 +39,7 @@ export function SessionArea({ sessionId, provider, status, connected, items, app
     </header>
     {pendingApproval ? <Approvals cards={approvals} checklist={checklist} connected={connected} inFlight={approvalInFlight} error={approvalError} confirmingAllowId={confirmingAllowId} onConfirmAllow={onConfirmAllow} onResolve={onResolve}/> : null}
     <SessionTranscript key={sessionId} sessionId={sessionId} items={items} status={status}/>
-    <PromptBox key={`prompt-${sessionId}-${promptClear && promptClearApplies(promptClear.sessionId, sessionId) ? promptClear.commandId : ''}`} sessionId={sessionId} error={promptError} connected={connected} onSend={onSendPrompt} onInterrupt={onInterrupt}/>
+    <PromptBox key={`prompt-${sessionId}-${promptClear && promptClearApplies(promptClear.sessionId, sessionId) ? promptClear.commandId : ''}`} sessionId={sessionId} error={promptError} connected={connected} onSend={onSendPrompt} onInterrupt={onInterrupt} onTakeOver={onTakeOver}/>
     <VerificationChecklist checks={checklist.checks}/>
     {!pendingApproval ? <Approvals cards={approvals} checklist={checklist} connected={connected} inFlight={approvalInFlight} error={approvalError} confirmingAllowId={confirmingAllowId} onConfirmAllow={onConfirmAllow} onResolve={onResolve}/> : null}
   </section>;
@@ -168,17 +169,37 @@ function SessionEvent({ event }: { event: TranscriptItem }) {
   </article>;
 }
 
-function PromptBox({ sessionId, error, connected, onSend, onInterrupt }: {
+function PromptBox({ sessionId, error, connected, onSend, onInterrupt, onTakeOver }: {
   sessionId: string;
   error: string | null;
   connected: boolean;
   onSend: (sessionId: string, prompt: string) => void;
   onInterrupt: (sessionId: string) => void;
+  onTakeOver?: ((sessionId: string) => void) | undefined;
 }) {
   const [text, setText] = useState('');
+  const [confirmingTakeOver, setConfirmingTakeOver] = useState(false);
+  const isLockedElsewhere = Boolean(error && error.toLowerCase().includes('active elsewhere'));
   return <section className="prompt" aria-labelledby="prompt-heading">
     <h2 id="prompt-heading">Prompt</h2>
-    {error ? <InlineAlert>{error}</InlineAlert> : null}
+    {error ? (
+      <InlineAlert>
+        <p>{error}</p>
+        {isLockedElsewhere && onTakeOver ? (
+          <div className="takeover-box" style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            {!confirmingTakeOver ? (
+              <Button onPress={() => setConfirmingTakeOver(true)}>Take Over Session</Button>
+            ) : (
+              <>
+                <span>Terminate other writer and resume here?</span>
+                <Button onPress={() => { setConfirmingTakeOver(false); onTakeOver(sessionId); }}>Confirm Take Over</Button>
+                <Button className="button-secondary" onPress={() => setConfirmingTakeOver(false)}>Cancel</Button>
+              </>
+            )}
+          </div>
+        ) : null}
+      </InlineAlert>
+    ) : null}
     <label htmlFor="session-prompt">Message to the agent</label>
     <TextArea id="session-prompt" value={text} onChange={(event) => setText(event.currentTarget.value)} placeholder="Write a prompt…"/>
     {text ? <Disclosure className="draft-preview"><Heading><Button slot="trigger">Draft preview</Button></Heading><DisclosurePanel><pre>{text}</pre></DisclosurePanel></Disclosure> : null}

@@ -197,28 +197,28 @@ Answer with evidence (commands, excerpts, version):
 ### Stage 3. Codex: write and continue
 
 **T3.1 Resume a session**
-- [R] From T2.1 pick the resume method (app-server or CLI); what is preserved and lost; how to remove `ephemeral` without side effects; effect on the session file.
-- [D] Continue an existing session keeping its context; new sessions are persisted too.
-- [T] A session started in the CLI → continued from Shardrail → opened in the CLI: one history, context kept (verify that the model "remembers").
-- Acceptance: the end-to-end scenario above passes on live Codex.
+- [x] [R] From T2.1 pick the resume method (app-server or CLI); what is preserved and lost; how to remove `ephemeral` without side effects; effect on the session file.
+- [x] [D] Continue an existing session keeping its context; new sessions are persisted too.
+- [x] [T] A session started in the CLI → continued from Shardrail → opened in the CLI: one history, context kept (verify that the model "remembers").
+- [x] Acceptance: the end-to-end scenario above passes on live Codex. (Documented in `docs/tasks/T3.1-codex-session-resume.md`).
 
 **T3.2 Send messages and commands, interrupt**
-- [D] Send a prompt to a session, instruction queue, interrupt, turn status (running / waiting / finished).
-- [T] Send during a running turn, retry of a command after a break (idempotency by `command_id`), interrupt.
+- [x] [D] Send a prompt to a session, instruction queue, interrupt, turn status (running / waiting / finished).
+- [x] [T] Send during a running turn, retry of a command after a break (idempotency by `command_id`), interrupt. (Documented in `docs/tasks/T3.2-messages-and-interrupt.md`).
 
 **T3.3 Approvals**
-- [D] Show confirmation requests (commands, edits), decisions allow-once/deny; deny by default on timeout, disconnect, journal error; write intent to the journal before answering the provider.
-- [T] Failure and fault scenarios, like the existing daemon tests; a live run.
+- [x] [D] Show confirmation requests (commands, edits), decisions allow-once/deny; deny by default on timeout, disconnect, journal error; write intent to the journal before answering the provider.
+- [x] [T] Failure and fault scenarios, like the existing daemon tests; a live run. (Documented in `docs/tasks/T3.3-approvals.md`).
 
 **T3.4 Concurrent-writer policy**
-- [R] From T2.1: what really happens with two writers.
-- [D] Decision (the owner approves): lock/indicator "session is active elsewhere", warning, a "take over" mode.
-- [T] Conflict scenarios CLI/GUI + Shardrail.
+- [x] [R] From T2.1: what really happens with two writers.
+- [x] [D] Decision (the owner approves): lock/indicator "session is active elsewhere", warning, a "take over" mode.
+- [x] [T] Conflict scenarios CLI/GUI + Shardrail. (Documented in `docs/tasks/T3.4-concurrent-writer-policy.md`).
 
 **T3.5 Close the stage**
-- [T] Regression: reading (stage 2) still works; a load run; repeat on the M1 and the server.
-- [P] Deploy to all machines.
-- Acceptance: Codex is fully controllable from the web on three machines.
+- [x] [T] Regression: reading (stage 2) still works; a load run; repeat on the M1 and the server.
+- [x] [P] Deploy to all machines.
+- [x] Acceptance: Codex is fully controllable from the web on three machines. (Documented in `docs/tasks/T3.5-stage3-closeout.md`).
 
 ---
 
