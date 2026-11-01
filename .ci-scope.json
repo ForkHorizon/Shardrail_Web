@@ -1,0 +1,52 @@
+{
+  "checks" : [
+    {
+      "id" : "code-linter",
+      "params" : {
+        "mode" : "auto"
+      },
+      "type" : "code-linter"
+    },
+    {
+      "id" : "python-quality",
+      "type" : "python-quality"
+    },
+    {
+      "id" : "python-tests",
+      "type" : "python-pytest"
+    },
+    {
+      "id" : "forbidden-constructs",
+      "params" : {
+        "mode" : "new"
+      },
+      "type" : "forbidden-constructs"
+    },
+    {
+      "id" : "duplicate-blocks",
+      "params" : {
+        "mode" : "new"
+      },
+      "type" : "duplicate-blocks"
+    },
+    {
+      "id" : "file-roles",
+      "params" : {
+        "mode" : "new"
+      },
+      "type" : "file-roles"
+    },
+    {
+      "id" : "agent-docs-stable",
+      "params" : {
+        "mode" : "new"
+      },
+      "type" : "agent-docs-stable"
+    },
+    {
+      "id" : "test-protection",
+      "type" : "test-protection"
+    }
+  ],
+  "version" : 1
+}
