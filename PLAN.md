@@ -154,15 +154,15 @@ Stage gate: all tasks of the stage accepted by the owner; CI green in every touc
 
 **T2.1 Codex research (the result shapes the rest of the stage)**
 Answer with evidence (commands, excerpts, version):
-- [R] Where and in what format Codex stores sessions (hypothesis: `~/.codex/sessions/.../rollout-*.jsonl`), the record types, whether the format is stable between versions.
-- [R] What `codex app-server` offers: list/read/resume of threads (hypothesis: `thread/list`, `thread/read`, `thread/resume`), events, approvals; how it differs from reading files.
-- [R] Whether `app-server` sees sessions started from the CLI and from the app; whether the CLI and the Codex GUI app share storage; whether one process can read a session that is active in another.
-- [R] What happens when the app/CLI and a third-party client work with one session at once (locks, conflicts, duplicates).
-- [R] Whether state can be **changed** (send messages, interrupt, change settings) through CLI modes (`codex exec`, `resume`), through app-server, through the GUI app; which of these are officially supported.
-- [R] How to tell that a session is active right now (process, lock, file freshness).
-- [R] Limits: sizes, encryption, what is persisted (reasoning, tool calls, diffs).
-- [D] Output document: a matrix "capability × method (files / app-server / CLI / GUI)", marked works / partially / impossible, with a recommended method for reading, syncing and writing.
-- Acceptance: the owner approved the recommendation; open risks are listed.
+- [x] [R] Where and in what format Codex stores sessions (hypothesis: `~/.codex/sessions/.../rollout-*.jsonl`), the record types, whether the format is stable between versions.
+- [x] [R] What `codex app-server` offers: list/read/resume of threads (hypothesis: `thread/list`, `thread/read`, `thread/resume`), events, approvals; how it differs from reading files.
+- [x] [R] Whether `app-server` sees sessions started from the CLI and from the app; whether the CLI and the Codex GUI app share storage; whether one process can read a session that is active in another.
+- [x] [R] What happens when the app/CLI and a third-party client work with one session at once (locks, conflicts, duplicates).
+- [x] [R] Whether state can be **changed** (send messages, interrupt, change settings) through CLI modes (`codex exec`, `resume`), through app-server, through the GUI app; which of these are officially supported.
+- [x] [R] How to tell that a session is active right now (process, lock, file freshness).
+- [x] [R] Limits: sizes, encryption, what is persisted (reasoning, tool calls, diffs).
+- [x] [D] Output document: a matrix "capability × method (files / app-server / CLI / GUI)", marked works / partially / impossible, with a recommended method for reading, syncing and writing.
+- Acceptance: the owner approved the recommendation; open risks are listed. (Details: `docs/tasks/T2.1-codex-research.md`)
 
 **T2.2 Agent adapter interface (shared by Codex and Claude Code)**
 - [D] Design from T2.1 (and preliminary Claude Code data from T4.1): list sessions, read history (paged), subscribe to new events, send, interrupt, approvals, session state, adapter capability flags.
