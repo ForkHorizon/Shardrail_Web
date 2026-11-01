@@ -139,7 +139,7 @@ Stage gate: all tasks of the stage accepted by the owner; CI green in every touc
 - [x] [D] Install script/instructions: download a release, install the service, autostart, pair with the hub using one code.
 - [x] [D] In-place Core update command without data loss.
 - [x] [T] Unit/integration tests, launchd plist validation, installer dry-run tests.
-- [ ] [P] Install on the M5, M1 and the server. **Needed from the owner: server OS, architecture, access.**
+- [x] [P] Install on the M5, M1 and the server. Verified live on relay & web UI (Ubuntu 26.04 x86_64 server `forkhorizon-vps`, macOS arm64 `m1-macbook`, macOS arm64 `macbook`).
 - Acceptance: a new machine is added from short instructions in minutes and appears in the UI. (Details: `docs/tasks/T1.2-core-install.md`)
 
 **T1.3 Relay and web console on the server**
