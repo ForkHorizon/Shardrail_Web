@@ -242,34 +242,34 @@ Answer with evidence (commands, excerpts, version):
 - Acceptance: both agents fit the shared interface without agent-specific leakage; skipped if nothing needs changing. (Details: `docs/tasks/T4.2-interface-adjustment.md`)
 
 **T4.3 Claude Code adapter: session list and full history**
-- [D] All sessions on the machine (CLI, desktop app and IDE where they share storage), metadata (id, working directory, title, time, model, state), paged history including tool calls, diffs and outputs.
-- [T] Fixtures from real files of several versions; corrupted/partly written file; very large session; live check on the test repository.
-- Acceptance: list and history match what Claude Code itself shows.
+- [x] [D] All sessions on the machine (CLI, desktop app and IDE where they share storage), metadata (id, working directory, title, time, model, state), paged history including tool calls, diffs and outputs.
+- [x] [T] Fixtures from real files of several versions; corrupted/partly written file; very large session; live check on the test repository.
+- Acceptance: list and history match what Claude Code itself shows. (Details: `docs/tasks/T4.3-claude-session-list-and-history.md`)
 
 **T4.4 Claude Code adapter: live sync**
-- [D] New records from a session written by the CLI/app appear in Shardrail in real time; cursors, de-duplication, recovery after a break (mirrors T2.5).
-- [T] Write in CLI → see on web; write in app → see on web; daemon restart; connection loss.
-- Acceptance: latency and integrity measured and recorded; no loss, no duplicates.
+- [x] [D] New records from a session written by the CLI/app appear in Shardrail in real time; cursors, de-duplication, recovery after a break (mirrors T2.5).
+- [x] [T] Write in CLI → see on web; write in app → see on web; daemon restart; connection loss.
+- Acceptance: latency and integrity measured and recorded; no loss, no duplicates. (Details: `docs/tasks/T4.4-claude-live-sync.md`)
 
 **T4.5 Claude Code adapter: resume, send, interrupt**
-- [D] Resume an existing session without losing context, send messages/commands, queue, interrupt, turn status (mirrors T3.1–T3.2).
-- [T] Session started in the CLI → continued from Shardrail → opened in the CLI with one history; send during a running turn; command retry idempotency; interrupt.
-- Acceptance: the end-to-end scenario passes on live Claude Code.
+- [x] [D] Resume an existing session without losing context, send messages/commands, queue, interrupt, turn status (mirrors T3.1–T3.2).
+- [x] [T] Session started in the CLI → continued from Shardrail → opened in the CLI with one history; send during a running turn; command retry idempotency; interrupt.
+- Acceptance: the end-to-end scenario passes on live Claude Code. (Details: `docs/tasks/T4.5-claude-session-control.md`)
 
 **T4.6 Claude Code approvals and permissions**
-- [D] Route permission requests to the UI with allow-once/deny; deny by default on timeout, disconnect or journal error; journal intent before answering; pin safe permission settings.
-- [T] Failure scenarios, live run on the test repository; verify no path produces an implicit allow.
-- Acceptance: behavior matches Codex approvals (T3.3).
+- [x] [D] Route permission requests to the UI with allow-once/deny; deny by default on timeout, disconnect or journal error; journal intent before answering; pin safe permission settings.
+- [x] [T] Failure scenarios, live run on the test repository; verify no path produces an implicit allow.
+- Acceptance: behavior matches Codex approvals (T3.3). (Details: `docs/tasks/T4.6-claude-approvals.md`)
 
 **T4.7 Concurrent-writer policy for Claude Code**
-- [D] Apply the T3.4 policy (lock/indicator/take-over) on the data from T4.1.
-- [T] Conflict scenarios CLI/GUI + Shardrail.
+- [x] [D] Apply the T3.4 policy (lock/indicator/take-over) on the data from T4.1.
+- [x] [T] Conflict scenarios CLI/GUI + Shardrail. (Details: `docs/tasks/T4.7-claude-concurrent-writer.md`)
 
 **T4.8 UI for Claude Code and mixed use**
-- [D] Same hierarchy UI; agent differences (capabilities, formats) shown honestly via capability flags.
-- [T] E2E with both agents at once, several machines.
-- [P] Deploy to all machines.
-- Acceptance: the end-to-end scenario (machine → agent → session → messages → continue) passes for Claude Code exactly as for Codex.
+- [x] [D] Same hierarchy UI; agent differences (capabilities, formats) shown honestly via capability flags.
+- [x] [T] E2E with both agents at once, several machines.
+- [x] [P] Deploy to all machines.
+- Acceptance: the end-to-end scenario (machine → agent → session → messages → continue) passes for Claude Code exactly as for Codex. (Details: `docs/tasks/T4.8-claude-stage4-closeout.md`)
 
 ---
 
