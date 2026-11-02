@@ -226,50 +226,50 @@ Answer with evidence (commands, excerpts, version):
 
 **T4.1 Claude Code research (the result shapes the rest of the stage)**
 Answer with evidence (commands, excerpts, version):
-- [R] Session storage (hypothesis: `~/.claude/projects/<encoded path>/<id>.jsonl`): format, record types, stability across versions, how subagent/sidechain records and compaction appear.
-- [R] Programmatic interfaces: the Agent SDK (`listSessions`, `getSessionMessages`, resume), headless `claude -p` with `stream-json` input/output, hooks. For each: officially supported or not, what it can read and write.
-- [R] Terms of use: which authentication the owner's usage is allowed under (own subscription or API key) for programmatic control; record the conclusion and any restrictions.
-- [R] Whether a message can be sent to an **already running** interactive process; what hooks can and cannot do; behavior when a session is active in another process.
-- [R] Whether the CLI, the desktop app and IDE extensions share storage and whether they see each other's sessions.
-- [R] Permissions/approvals: how they work in the SDK and in the CLI; how to route them to an external client; settings that must be pinned for safety.
-- [R] How to detect an active session; locks; what happens to a session file when it is resumed from a second process.
-- [D] Output document: the same capability matrix as in T2.1 and a recommendation; list where Claude Code does not fit the interface from T2.2.
-- Acceptance: the owner approved; differences versus Codex are listed.
+- [x] [R] Session storage (hypothesis: `~/.claude/projects/<encoded path>/<id>.jsonl`): format, record types, stability across versions, how subagent/sidechain records and compaction appear.
+- [x] [R] Programmatic interfaces: the Agent SDK (`listSessions`, `getSessionMessages`, resume), headless `claude -p` with `stream-json` input/output, hooks. For each: officially supported or not, what it can read and write.
+- [x] [R] Terms of use: which authentication the owner's usage is allowed under (own subscription or API key) for programmatic control; record the conclusion and any restrictions.
+- [x] [R] Whether a message can be sent to an **already running** interactive process; what hooks can and cannot do; behavior when a session is active in another process.
+- [x] [R] Whether the CLI, the desktop app and IDE extensions share storage and whether they see each other's sessions.
+- [x] [R] Permissions/approvals: how they work in the SDK and in the CLI; how to route them to an external client; settings that must be pinned for safety.
+- [x] [R] How to detect an active session; locks; what happens to a session file when it is resumed from a second process.
+- [x] [D] Output document: the same capability matrix as in T2.1 and a recommendation; list where Claude Code does not fit the interface from T2.2.
+- Acceptance: the owner approved; differences versus Codex are listed. (Details: `docs/tasks/T4.1-claude-research.md`)
 
 **T4.2 Interface adjustment (only if T4.1 requires it)**
-- [D] Propose the minimum change to the T2.2 interface as a separate owner decision. Keep Codex working.
-- [T] Contract tests plus full Codex regression after the change.
-- Acceptance: both agents fit the shared interface without agent-specific leakage; skipped if nothing needs changing.
+- [x] [D] Propose the minimum change to the T2.2 interface as a separate owner decision. Keep Codex working.
+- [x] [T] Contract tests plus full Codex regression after the change.
+- Acceptance: both agents fit the shared interface without agent-specific leakage; skipped if nothing needs changing. (Details: `docs/tasks/T4.2-interface-adjustment.md`)
 
 **T4.3 Claude Code adapter: session list and full history**
-- [D] All sessions on the machine (CLI, desktop app and IDE where they share storage), metadata (id, working directory, title, time, model, state), paged history including tool calls, diffs and outputs.
-- [T] Fixtures from real files of several versions; corrupted/partly written file; very large session; live check on the test repository.
-- Acceptance: list and history match what Claude Code itself shows.
+- [x] [D] All sessions on the machine (CLI, desktop app and IDE where they share storage), metadata (id, working directory, title, time, model, state), paged history including tool calls, diffs and outputs.
+- [x] [T] Fixtures from real files of several versions; corrupted/partly written file; very large session; live check on the test repository.
+- Acceptance: list and history match what Claude Code itself shows. (Details: `docs/tasks/T4.3-claude-session-list-and-history.md`)
 
 **T4.4 Claude Code adapter: live sync**
-- [D] New records from a session written by the CLI/app appear in Shardrail in real time; cursors, de-duplication, recovery after a break (mirrors T2.5).
-- [T] Write in CLI → see on web; write in app → see on web; daemon restart; connection loss.
-- Acceptance: latency and integrity measured and recorded; no loss, no duplicates.
+- [x] [D] New records from a session written by the CLI/app appear in Shardrail in real time; cursors, de-duplication, recovery after a break (mirrors T2.5).
+- [x] [T] Write in CLI → see on web; write in app → see on web; daemon restart; connection loss.
+- Acceptance: latency and integrity measured and recorded; no loss, no duplicates. (Details: `docs/tasks/T4.4-claude-live-sync.md`)
 
 **T4.5 Claude Code adapter: resume, send, interrupt**
-- [D] Resume an existing session without losing context, send messages/commands, queue, interrupt, turn status (mirrors T3.1–T3.2).
-- [T] Session started in the CLI → continued from Shardrail → opened in the CLI with one history; send during a running turn; command retry idempotency; interrupt.
-- Acceptance: the end-to-end scenario passes on live Claude Code.
+- [x] [D] Resume an existing session without losing context, send messages/commands, queue, interrupt, turn status (mirrors T3.1–T3.2).
+- [x] [T] Session started in the CLI → continued from Shardrail → opened in the CLI with one history; send during a running turn; command retry idempotency; interrupt.
+- Acceptance: the end-to-end scenario passes on live Claude Code. (Details: `docs/tasks/T4.5-claude-session-control.md`)
 
 **T4.6 Claude Code approvals and permissions**
-- [D] Route permission requests to the UI with allow-once/deny; deny by default on timeout, disconnect or journal error; journal intent before answering; pin safe permission settings.
-- [T] Failure scenarios, live run on the test repository; verify no path produces an implicit allow.
-- Acceptance: behavior matches Codex approvals (T3.3).
+- [x] [D] Route permission requests to the UI with allow-once/deny; deny by default on timeout, disconnect or journal error; journal intent before answering; pin safe permission settings.
+- [x] [T] Failure scenarios, live run on the test repository; verify no path produces an implicit allow.
+- Acceptance: behavior matches Codex approvals (T3.3). (Details: `docs/tasks/T4.6-claude-approvals.md`)
 
 **T4.7 Concurrent-writer policy for Claude Code**
-- [D] Apply the T3.4 policy (lock/indicator/take-over) on the data from T4.1.
-- [T] Conflict scenarios CLI/GUI + Shardrail.
+- [x] [D] Apply the T3.4 policy (lock/indicator/take-over) on the data from T4.1.
+- [x] [T] Conflict scenarios CLI/GUI + Shardrail. (Details: `docs/tasks/T4.7-claude-concurrent-writer.md`)
 
 **T4.8 UI for Claude Code and mixed use**
-- [D] Same hierarchy UI; agent differences (capabilities, formats) shown honestly via capability flags.
-- [T] E2E with both agents at once, several machines.
-- [P] Deploy to all machines.
-- Acceptance: the end-to-end scenario (machine → agent → session → messages → continue) passes for Claude Code exactly as for Codex.
+- [x] [D] Same hierarchy UI; agent differences (capabilities, formats) shown honestly via capability flags.
+- [x] [T] E2E with both agents at once, several machines.
+- [x] [P] Deploy to all machines.
+- Acceptance: the end-to-end scenario (machine → agent → session → messages → continue) passes for Claude Code exactly as for Codex. (Details: `docs/tasks/T4.8-claude-stage4-closeout.md`)
 
 ---
 

@@ -1,0 +1,7 @@
+[tool.ruff]
+exclude = [
+    "apps/web/b3-bench.py",
+    "apps/web/tests/fixtures",
+    "planning/tests",
+    "**/node_modules",
+]
