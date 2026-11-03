@@ -7,3 +7,7 @@ The canonical roadmap, task progression, acceptance criteria, and stage status a
 - `PLAN.md` (at the root of `Shardrail_Web`).
 
 Do not update documents in this directory for active task planning. These documents are preserved for historical reference and architectural lineage.
+
+## Archive Branch Lineage
+- Branch `archive/pre-split-spikes` preserves the early experimental spikes, benchmarks, and multi-architecture prototypes evaluated prior to repository separation.
+- Status: Archived and tracked against `main`.
