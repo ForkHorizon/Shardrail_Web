@@ -19,11 +19,12 @@ export function EntryArea({ sessions, events, selectedId, workdirs, pickedWorkdi
   phase: ConnectionPhase;
   onSelect: (sessionId: string | null) => void;
   onPickWorkdir: (workdir: string) => void;
-  onCreateSession: (workdir: string) => void;
+  onCreateSession: (workdir: string, agentKind?: string) => void;
 }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'name'>('newest');
+  const [pickedAgent, setPickedAgent] = useState<'codex' | 'claude'>('codex');
 
   const selectedWorkdir = workdirs?.includes(pickedWorkdir) ? pickedWorkdir : (workdirs?.[0] ?? '');
 
@@ -57,13 +58,24 @@ export function EntryArea({ sessions, events, selectedId, workdirs, pickedWorkdi
   }, [sessions, searchQuery, statusFilter, sortBy]);
 
   return <section className="session-column" aria-labelledby="sessions-heading">
-    <div className="entry-heading"><div><p className="eyebrow">WORKSPACES</p><h2 id="sessions-heading"><Icon className="icon" name="sessions"/> Sessions <span className="session-count">{filteredSessions.length}{filteredSessions.length !== sessions.length ? ` / ${sessions.length}` : ''}</span></h2></div></div>
+    <div className="entry-heading"><div><p className="eyebrow">WORKSPACES</p><h2 id="sessions-heading"><Icon className="icon" name="sessions"/> Sessions <span className="session-count">{filteredSessions.length}{filteredSessions.length !== sessions.length ? ' / ' + sessions.length : ''}</span></h2></div></div>
     {workdirs !== null ? <section className="new-session" aria-label="New session">
-      <Select aria-label="Workdir" selectedKey={selectedWorkdir || null} onSelectionChange={(key) => onPickWorkdir(String(key ?? ''))} isDisabled={workdirs.length === 0}>
-        <Label>Workdir</Label><Button className="field-control"><SelectValue>{workdirs.length === 0 ? 'No workdir reported' : undefined}</SelectValue><span aria-hidden="true">⌄</span></Button>
-        <Popover><ListBox>{workdirs.map((dir) => <ListBoxItem key={dir} id={dir} textValue={dir}>{dir}</ListBoxItem>)}</ListBox></Popover>
-      </Select>
-      <Button className="create-session-button" isDisabled={selectedWorkdir.length === 0 || createPending || phase !== 'connected'} onPress={() => onCreateSession(selectedWorkdir)}>{createPending ? <><span className="state-spinner" aria-hidden="true"/>{phase === 'connected' ? 'Creating session…' : 'Checking session creation…'}</> : 'New session'}</Button>
+      <div className="new-session-fields" style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <Select aria-label="Workdir" selectedKey={selectedWorkdir || null} onSelectionChange={(key) => onPickWorkdir(String(key ?? ''))} isDisabled={workdirs.length === 0} style={{ flex: 1, minWidth: '160px' }}>
+          <Label>Workdir</Label><Button className="field-control"><SelectValue>{workdirs.length === 0 ? 'No workdir reported' : undefined}</SelectValue><span aria-hidden="true">⌄</span></Button>
+          <Popover><ListBox>{workdirs.map((dir) => <ListBoxItem key={dir} id={dir} textValue={dir}>{dir}</ListBoxItem>)}</ListBox></Popover>
+        </Select>
+        <Select aria-label="Agent" selectedKey={pickedAgent} onSelectionChange={(key) => setPickedAgent((key as 'codex' | 'claude') ?? 'codex')} style={{ width: '130px' }}>
+          <Label>Agent</Label><Button className="field-control"><SelectValue /><span aria-hidden="true">⌄</span></Button>
+          <Popover>
+            <ListBox>
+              <ListBoxItem id="codex" textValue="Codex">Codex</ListBoxItem>
+              <ListBoxItem id="claude" textValue="Claude Code">Claude Code</ListBoxItem>
+            </ListBox>
+          </Popover>
+        </Select>
+      </div>
+      <Button className="create-session-button" isDisabled={selectedWorkdir.length === 0 || createPending || phase !== 'connected'} onPress={() => onCreateSession(selectedWorkdir, pickedAgent)}>{createPending ? <><span className="state-spinner" aria-hidden="true"/>{phase === 'connected' ? 'Creating session…' : 'Checking session creation…'}</> : 'New session'}</Button>
       {createPending ? <p className="create-pending" role="status">{phase === 'connected' ? 'Waiting for the daemon to confirm the new session.' : 'Connection interrupted. Reconnect to learn whether the session was created.'}</p> : null}
       {workdirs.length === 0 ? <p className="field-help">No available workdirs were reported by the daemon.</p> : null}
       {phase !== 'connected' && workdirs.length > 0 ? <p className="field-help">Reconnect to the daemon before creating a session.</p> : null}

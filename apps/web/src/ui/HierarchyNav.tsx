@@ -5,21 +5,21 @@ import { StatusPill } from './StatusPill';
 export type MachineEntry = {
   id: string;
   name: string;
-  os?: string;
-  arch?: string;
-  daemonVersion?: string;
-  isOnline?: boolean;
-  agentCount?: number;
-  sessionCount?: number;
+  os?: string | undefined;
+  arch?: string | undefined;
+  daemonVersion?: string | undefined;
+  isOnline?: boolean | undefined;
+  agentCount?: number | undefined;
+  sessionCount?: number | undefined;
 };
 
 export type AgentEntry = {
   name: string;
   label: string;
-  form?: 'cli' | 'gui';
-  version?: string | null;
-  available?: boolean;
-  sessionCount?: number;
+  form?: 'cli' | 'gui' | undefined;
+  version?: string | null | undefined;
+  available?: boolean | undefined;
+  sessionCount?: number | undefined;
 };
 
 export function HierarchyNav({
