@@ -276,63 +276,63 @@ Answer with evidence (commands, excerpts, version):
 ### Stage 5. Terminal and desktop apps (research and owner decision first)
 
 **T5.1 Research: how to launch and attach to an agent in a terminal**
-- [R] Options: (a) Shardrail launches the agent itself in a managed PTY (the daemon holds the process; the browser attaches and re-attaches); (b) a wrapper `shardrail run <agent>` launches the agent with attach support; (c) attaching to a process the owner started by hand in an ordinary terminal (tmux/iTerm/Terminal).
-- [R] For each option: what is possible on macOS and Linux (permissions, TIOCSTI/input injection limits, tmux integration, `reptyr`-like tools), what the user sees in the original terminal, how screen sync and input work, what breaks, security impact.
-- [R] Compatibility with the "session is a file" model (stages 2–4): can read-from-files plus managed launch for writing be enough.
-- [R] What "stop and resume under Shardrail" costs for option (c): what is lost (the running turn), what is kept (context from the session file), and how to make this explicit and safe in the UI.
-- [D] A document with a recommendation; prototypes of the two most likely options (agree with the owner).
-- Acceptance: **owner decision**. T5.3 does not start before it.
+- [x] [R] Options: (a) Shardrail launches the agent itself in a managed PTY (the daemon holds the process; the browser attaches and re-attaches); (b) a wrapper `shardrail run <agent>` launches the agent with attach support; (c) attaching to a process the owner started by hand in an ordinary terminal (tmux/iTerm/Terminal).
+- [x] [R] For each option: what is possible on macOS and Linux (permissions, TIOCSTI/input injection limits, tmux integration, `reptyr`-like tools), what the user sees in the original terminal, how screen sync and input work, what breaks, security impact.
+- [x] [R] Compatibility with the "session is a file" model (stages 2–4): can read-from-files plus managed launch for writing be enough.
+- [x] [R] What "stop and resume under Shardrail" costs for option (c): what is lost (the running turn), what is kept (context from the session file), and how to make this explicit and safe in the UI.
+- [x] [D] A document with a recommendation; prototypes of the two most likely options (agree with the owner).
+- Acceptance: **owner decision**. T5.3 does not start before it. (Details: `docs/tasks/T5.1-terminal-launch-attach.md`)
 
 **T5.2 Research: desktop (GUI) apps**
-- [R] For the Codex app and Claude desktop (later Antigravity): where the data lives, whether the backend/storage is shared with the CLI, whether a local API/IPC/protocol exists, whether a message can be sent programmatically, how the app reacts to external changes of session files.
-- [R] What is possible without hacks (official interfaces) versus only via UI automation (Accessibility). For each item rate reliability and risk and propose the acceptable boundary.
-- [D] A table "app × (read / live / write / launch)" with ratings and a recommendation.
-- Acceptance: owner decision for each app.
+- [x] [R] For the Codex app and Claude desktop (later Antigravity): where the data lives, whether the backend/storage is shared with the CLI, whether a local API/IPC/protocol exists, whether a message can be sent programmatically, how the app reacts to external changes of session files.
+- [x] [R] What is possible without hacks (official interfaces) versus only via UI automation (Accessibility). For each item rate reliability and risk and propose the acceptable boundary.
+- [x] [D] A table "app × (read / live / write / launch)" with ratings and a recommendation.
+- Acceptance: owner decision for each app. (Details: `docs/tasks/T5.2-desktop-apps.md`)
 
 **T5.3 Terminal access implementation** (per the T5.1 decision)
-- [D] PTY layer in the daemon, output streamed to the browser (terminal in the web), input, resize, reconnect, permission limits, replay of recent output on attach.
-- [D] Link a terminal session to its agent session (stages 2–4) so the chat view and the terminal view show the same session.
-- [T] Long sessions, network breaks, several browsers attached at once, control sequences treated as untrusted input, large outputs.
-- [P] All three machines.
-- Acceptance: the owner can launch (or attach to) a Codex and a Claude Code terminal session from the web, type, close the browser, return, and continue.
+- [x] [D] PTY layer in the daemon, output streamed to the browser (terminal in the web), input, resize, reconnect, permission limits, replay of recent output on attach.
+- [x] [D] Link a terminal session to its agent session (stages 2–4) so the chat view and the terminal view show the same session.
+- [x] [T] Long sessions, network breaks, several browsers attached at once, control sequences treated as untrusted input, large outputs.
+- [x] [P] All three machines.
+- Acceptance: the owner can launch (or attach to) a Codex and a Claude Code terminal session from the web, type, close the browser, return, and continue. (Details: `docs/tasks/T5.3-terminal-access.md`)
 
 **T5.4 Desktop app access implementation** (per the T5.2 decision)
-- [D] Scope is defined by the findings: at minimum read and live sync; write only if there is a reliable method.
-- [T] Scenario "I write in the app → I see it in Shardrail" and back, where possible; behavior when the app is closed or updated.
-- [P] All three machines.
-- Acceptance: documented per-app support level matching the owner decision.
+- [x] [D] Scope is defined by the findings: at minimum read and live sync; write only if there is a reliable method.
+- [x] [T] Scenario "I write in the app → I see it in Shardrail" and back, where possible; behavior when the app is closed or updated.
+- [x] [P] All three machines.
+- Acceptance: documented per-app support level matching the owner decision. (Details: `docs/tasks/T5.4-desktop-apps.md`)
 
 ---
 
 ### Stage 6. Reliability and N1 acceptance
 
 **T6.1 Fault tolerance**
-- [T] Scenarios: daemon restart in the middle of a turn, relay restart, machine reboot, browser tab closed, network change, disk full on a machine, clock skew. Pass condition for each: journal intact, nothing lost or duplicated, statuses honest, pending approvals fail closed.
-- [D] Fix everything found; add a regression test for each fix.
-- Acceptance: a written fault matrix with results, all rows pass.
+- [x] [T] Scenarios: daemon restart in the middle of a turn, relay restart, machine reboot, browser tab closed, network change, disk full on a machine, clock skew. Pass condition for each: journal intact, nothing lost or duplicated, statuses honest, pending approvals fail closed.
+- [x] [D] Fix everything found; add a regression test for each fix.
+- Acceptance: a written fault matrix with results, all rows pass. (Details: `docs/tasks/T6.1-fault-tolerance.md`)
 
 **T6.2 Sync correctness under stress**
-- [T] Simultaneous writers (CLI + Shardrail + app) on one session, rapid message bursts, very long sessions, reconnect storms. Verify ordering, no duplicates, correct conflict indication (T3.4/T4.7).
-- Acceptance: no data corruption; behavior matches the written policy.
+- [x] [T] Simultaneous writers (CLI + Shardrail + app) on one session, rapid message bursts, very long sessions, reconnect storms. Verify ordering, no duplicates, correct conflict indication (T3.4/T4.7).
+- Acceptance: no data corruption; behavior matches the written policy. (Details: `docs/tasks/T6.2-sync-correctness.md`)
 
 **T6.3 Performance and long runs**
-- [T] Measure first, then set targets with the owner: event latency from agent to browser (p50/p95), time to open a large session, daemon memory and CPU idle and loaded, relay load with several machines, a 24-hour soak with real use.
-- [D] Fix regressions; record the numbers in `docs/tasks/T6.3.md` as the baseline for future work (use `planning/07-performance.md` only as a reference).
-- Acceptance: numbers recorded and accepted by the owner.
+- [x] [T] Measure first, then set targets with the owner: event latency from agent to browser (p50/p95), time to open a large session, daemon memory and CPU idle and loaded, relay load with several machines, a 24-hour soak with real use.
+- [x] [D] Fix regressions; record the numbers in `docs/tasks/T6.3.md` as the baseline for future work (use `planning/07-performance.md` only as a reference).
+- Acceptance: numbers recorded and accepted by the owner. (Details: `docs/tasks/T6.3.md`)
 
 **T6.4 Security review**
-- [T] Re-check pairing, Host/Origin, E2E, device revocation, relay compromise assumptions, secrets absent from logs/journal/URLs, untrusted agent output rendering, terminal escape handling, loss of a paired device.
-- [D] Fix findings; document the remaining accepted risks.
-- Acceptance: a short security report; no open high-severity finding.
+- [x] [T] Re-check pairing, Host/Origin, E2E, device revocation, relay compromise assumptions, secrets absent from logs/journal/URLs, untrusted agent output rendering, terminal escape handling, loss of a paired device.
+- [x] [D] Fix findings; document the remaining accepted risks.
+- Acceptance: a short security report; no open high-severity finding. (Details: `docs/tasks/T6.4-security-review.md`)
 
 **T6.5 Install, update and recovery drills**
-- [T] Fresh install on a clean machine from the instructions; in-place update of Core and Web; restore after losing a machine; adding a fourth machine as a dry run.
-- Acceptance: each drill passes from the written instructions alone.
+- [x] [T] Fresh install on a clean machine from the instructions; in-place update of Core and Web; restore after losing a machine; adding a fourth machine as a dry run.
+- Acceptance: each drill passes from the written instructions alone. (Details: `docs/tasks/T6.5-install-update-recovery.md`)
 
 **T6.6 N1 acceptance**
-- [V] Report against the N1 criteria (§1): for Codex and Claude Code on the M5, M1 and the server: open the machine → agent → session → read history → continue work → result visible everywhere. Includes terminal and GUI support level per T5.
-- [G] Tag the N1 release in every repository; update the root `CLAUDE.md` and rebuild the code graph.
-- Acceptance: the owner signs off. Only then is N2 planned.
+- [x] [V] Report against the N1 criteria (§1): for Codex and Claude Code on the M5, M1 and the server: open the machine → agent → session → read history → continue work → result visible everywhere. Includes terminal and GUI support level per T5.
+- [x] [G] Tag the N1 release in every repository; update the root `CLAUDE.md` and rebuild the code graph.
+- Acceptance: the owner signs off. Only then is N2 planned. (Details: `docs/tasks/T6.6-n1-acceptance.md`)
 
 ---
 
