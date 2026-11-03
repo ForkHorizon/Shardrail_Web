@@ -9,9 +9,31 @@ import { ThemeToggle } from './ui/ThemeToggle';
 import { Icon } from './ui/Icon';
 import { StatusPill } from './ui/StatusPill';
 import { EmptyState } from './ui/EmptyState';
-import { HierarchyNav } from './ui/HierarchyNav';
+import { HierarchyNav, type MachineEntry } from './ui/HierarchyNav';
 
-export function MainScreen({ phase, keyStorage, approvalInFlight, approvalError, promptError, promptClear, workdirs, createError, createPending, createdSessionId, dismissedSessionId, onReconnect, onUnpair, onResolveApproval, onSendPrompt, onInterrupt, onTakeOver, onCreateSession }: {
+export function MainScreen({
+  phase,
+  keyStorage,
+  approvalInFlight,
+  approvalError,
+  promptError,
+  promptClear,
+  workdirs,
+  createError,
+  createPending,
+  createdSessionId,
+  dismissedSessionId,
+  onReconnect,
+  onUnpair,
+  onResolveApproval,
+  onSendPrompt,
+  onInterrupt,
+  onTakeOver,
+  onCreateSession,
+  machines: propsMachines,
+  selectedMachineId: propsSelectedMachineId,
+  onSelectMachine,
+}: {
   phase: ConnectionPhase;
   keyStorage?: 'webcrypto' | 'noble-fallback';
   approvalInFlight: ReadonlySet<string>;
@@ -29,7 +51,10 @@ export function MainScreen({ phase, keyStorage, approvalInFlight, approvalError,
   onSendPrompt: (sessionId: string, prompt: string) => void;
   onInterrupt: (sessionId: string) => void;
   onTakeOver?: ((sessionId: string) => void) | undefined;
-  onCreateSession: (workdir: string) => void;
+  onCreateSession: (workdir: string, agentKind?: string) => void;
+  machines?: readonly MachineEntry[];
+  selectedMachineId?: string | null;
+  onSelectMachine?: (id: string | null) => void;
 }) {
   const events = useSessionJournalEvents();
   const sessions = useMemo(() => sessionSummaries(events), [events]);
@@ -46,17 +71,35 @@ export function MainScreen({ phase, keyStorage, approvalInFlight, approvalError,
   const [pickedWorkdir, setPickedWorkdir] = useState('');
   const [confirmingAllowId, setConfirmingAllowId] = useState<string | null>(null);
   const [mobileDetail, setMobileDetail] = useState(false);
-  const [selectedMachineId, setSelectedMachineId] = useState<string | null>('local');
+  const [selectedMachineIdState, setSelectedMachineIdState] = useState<string | null>(propsSelectedMachineId ?? 'local');
+  const selectedMachineId = propsSelectedMachineId !== undefined ? propsSelectedMachineId : selectedMachineIdState;
+  const handleSelectMachine = (id: string | null) => {
+    setSelectedMachineIdState(id);
+    if (onSelectMachine) onSelectMachine(id);
+  };
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
 
-  const machines = useMemo(() => [
-    { id: 'local', name: 'Local Machine', isOnline: phase === 'connected', sessionCount: sessions.length }
-  ], [phase, sessions.length]);
+  const machines = useMemo(() => {
+    if (propsMachines && propsMachines.length > 0) {
+      return propsMachines.map((m) => ({
+        ...m,
+        sessionCount: m.sessionCount ?? sessions.filter((s) => s.machineId === m.id || (m.id === 'local' && (!s.machineId || s.machineId === 'local'))).length,
+      }));
+    }
+    return [
+      { id: 'local', name: 'Local Machine', isOnline: phase === 'connected', sessionCount: sessions.length }
+    ];
+  }, [propsMachines, phase, sessions]);
+
+  const machineFilteredSessions = useMemo(() => {
+    if (!selectedMachineId || selectedMachineId === 'local' || machines.length <= 1) return sessions;
+    return sessions.filter((s) => s.machineId === selectedMachineId);
+  }, [sessions, selectedMachineId, machines.length]);
 
   const agents = useMemo(() => {
-    const codexCount = sessions.filter((s) => s.agentKind?.toLowerCase().includes('codex')).length;
-    const claudeCount = sessions.filter((s) => s.agentKind?.toLowerCase().includes('claude')).length;
-    const otherCount = sessions.length - codexCount - claudeCount;
+    const codexCount = machineFilteredSessions.filter((s) => s.agentKind?.toLowerCase().includes('codex')).length;
+    const claudeCount = machineFilteredSessions.filter((s) => s.agentKind?.toLowerCase().includes('claude')).length;
+    const otherCount = machineFilteredSessions.length - codexCount - claudeCount;
     const list = [
       { name: 'codex', label: 'Codex', sessionCount: codexCount },
       { name: 'claude_code', label: 'Claude Code', sessionCount: claudeCount },
@@ -65,14 +108,14 @@ export function MainScreen({ phase, keyStorage, approvalInFlight, approvalError,
       list.push({ name: 'other', label: 'Other', sessionCount: otherCount });
     }
     return list;
-  }, [sessions]);
+  }, [machineFilteredSessions]);
 
   const agentFilteredSessions = useMemo(() => {
-    if (!selectedAgent) return sessions;
-    if (selectedAgent === 'codex') return sessions.filter((s) => s.agentKind?.toLowerCase().includes('codex'));
-    if (selectedAgent === 'claude_code') return sessions.filter((s) => s.agentKind?.toLowerCase().includes('claude'));
-    return sessions.filter((s) => !s.agentKind?.toLowerCase().includes('codex') && !s.agentKind?.toLowerCase().includes('claude'));
-  }, [sessions, selectedAgent]);
+    if (!selectedAgent) return machineFilteredSessions;
+    if (selectedAgent === 'codex') return machineFilteredSessions.filter((s) => s.agentKind?.toLowerCase().includes('codex'));
+    if (selectedAgent === 'claude_code') return machineFilteredSessions.filter((s) => s.agentKind?.toLowerCase().includes('claude'));
+    return machineFilteredSessions.filter((s) => !s.agentKind?.toLowerCase().includes('codex') && !s.agentKind?.toLowerCase().includes('claude'));
+  }, [machineFilteredSessions, selectedAgent]);
 
   const selected = sessions.find((session) => session.id === selectedId) ?? null;
   const visible = useMemo(() => selected ? eventsForSession(events, selected.id) : [], [events, selected]);
@@ -106,7 +149,7 @@ export function MainScreen({ phase, keyStorage, approvalInFlight, approvalError,
     <HierarchyNav
       machines={machines}
       selectedMachineId={selectedMachineId}
-      onSelectMachine={setSelectedMachineId}
+      onSelectMachine={handleSelectMachine}
       agents={agents}
       selectedAgent={selectedAgent}
       onSelectAgent={setSelectedAgent}
