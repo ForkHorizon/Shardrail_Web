@@ -11,8 +11,32 @@ import { SafeDiffView } from '../../ui/SafeDiffView';
 import { SafeCommandView } from '../../ui/SafeCommandView';
 import { SafeReasoningView } from '../../ui/SafeReasoningView';
 import { SafeToolView } from '../../ui/SafeToolView';
+import { TerminalView } from './TerminalView';
 
-export function SessionArea({ sessionId, provider, status, connected, items, approvals, checklist, promptError, promptClear, approvalInFlight, approvalError, confirmingAllowId, onConfirmAllow, onResolve, onSendPrompt, onInterrupt, onTakeOver }: {
+export function SessionArea({
+  sessionId,
+  provider,
+  status,
+  connected,
+  items,
+  approvals,
+  checklist,
+  promptError,
+  promptClear,
+  approvalInFlight,
+  approvalError,
+  confirmingAllowId,
+  onConfirmAllow,
+  onResolve,
+  onSendPrompt,
+  onInterrupt,
+  onTakeOver,
+  terminalOutput,
+  terminalExitCode,
+  onSendTerminalInput,
+  onAttachTerminal,
+  onClearTerminal,
+}: {
   sessionId: string;
   provider: string | null;
   status: string;
@@ -30,18 +54,46 @@ export function SessionArea({ sessionId, provider, status, connected, items, app
   onSendPrompt: (sessionId: string, prompt: string) => void;
   onInterrupt: (sessionId: string) => void;
   onTakeOver?: ((sessionId: string) => void) | undefined;
+  terminalOutput?: string;
+  terminalExitCode?: number | null;
+  onSendTerminalInput?: (sessionId: string, data: string) => void;
+  onAttachTerminal?: (sessionId: string) => void;
+  onClearTerminal?: (sessionId: string) => void;
 }) {
+  const [viewMode, setViewMode] = useState<'chat' | 'terminal'>('chat');
   const pendingApproval = approvals.some((card) => card.state === 'pending');
   return <section className="session-detail" aria-labelledby="events-heading">
     <header className="session-heading">
       <div><p className="eyebrow">Session detail</p><h2 id="events-heading" title={sessionId}>Events for {sessionId.slice(0, 8)}</h2></div>
+      <div className="session-view-switcher" role="tablist" aria-label="Session view mode">
+        <ToggleButton className="view-toggle-btn" isSelected={viewMode === 'chat'} onChange={() => setViewMode('chat')}>
+          Chat
+        </ToggleButton>
+        <ToggleButton className="view-toggle-btn" isSelected={viewMode === 'terminal'} onChange={() => setViewMode('terminal')}>
+          Terminal
+        </ToggleButton>
+      </div>
       <dl className="session-facts"><div><dt>Provider</dt><dd>{provider ?? 'Unknown provider'}</dd></div><div><dt>Status</dt><dd><span className="status-dot" aria-hidden="true"/>{status}</dd></div></dl>
     </header>
-    {pendingApproval ? <Approvals cards={approvals} checklist={checklist} connected={connected} inFlight={approvalInFlight} error={approvalError} confirmingAllowId={confirmingAllowId} onConfirmAllow={onConfirmAllow} onResolve={onResolve}/> : null}
-    <SessionTranscript key={sessionId} sessionId={sessionId} items={items} status={status}/>
-    <PromptBox key={`prompt-${sessionId}-${promptClear && promptClearApplies(promptClear.sessionId, sessionId) ? promptClear.commandId : ''}`} sessionId={sessionId} error={promptError} connected={connected} onSend={onSendPrompt} onInterrupt={onInterrupt} onTakeOver={onTakeOver}/>
-    <VerificationChecklist checks={checklist.checks}/>
-    {!pendingApproval ? <Approvals cards={approvals} checklist={checklist} connected={connected} inFlight={approvalInFlight} error={approvalError} confirmingAllowId={confirmingAllowId} onConfirmAllow={onConfirmAllow} onResolve={onResolve}/> : null}
+    {viewMode === 'terminal' ? (
+      <TerminalView
+        sessionId={sessionId}
+        connected={connected}
+        output={terminalOutput ?? ''}
+        exitCode={terminalExitCode ?? null}
+        onSendInput={(data) => onSendTerminalInput?.(sessionId, data)}
+        onAttach={() => onAttachTerminal?.(sessionId)}
+        onClear={() => onClearTerminal?.(sessionId)}>
+      </TerminalView>
+    ) : (
+      <>
+        {pendingApproval ? <Approvals cards={approvals} checklist={checklist} connected={connected} inFlight={approvalInFlight} error={approvalError} confirmingAllowId={confirmingAllowId} onConfirmAllow={onConfirmAllow} onResolve={onResolve}/> : null}
+        <SessionTranscript key={sessionId} sessionId={sessionId} items={items} status={status}/>
+        <PromptBox key={`prompt-${sessionId}-${promptClear && promptClearApplies(promptClear.sessionId, sessionId) ? promptClear.commandId : ''}`} sessionId={sessionId} error={promptError} connected={connected} onSend={onSendPrompt} onInterrupt={onInterrupt} onTakeOver={onTakeOver}/>
+        <VerificationChecklist checks={checklist.checks}/>
+        {!pendingApproval ? <Approvals cards={approvals} checklist={checklist} connected={connected} inFlight={approvalInFlight} error={approvalError} confirmingAllowId={confirmingAllowId} onConfirmAllow={onConfirmAllow} onResolve={onResolve}/> : null}
+      </>
+    )}
   </section>;
 }
 
@@ -70,6 +122,42 @@ function SessionTranscript({ sessionId, items, status }: { sessionId: string; it
   </section>;
 }
 
+function getRoleLabel(event: TranscriptItem): string {
+  if (event.role === 'user') return 'User prompt';
+  if (event.presentation === 'message') return 'Agent message';
+  if (event.presentation === 'approval') return 'Approval';
+  if (event.presentation === 'diff') return 'Diff / File change';
+  if (event.presentation === 'command') return 'Command execution';
+  if (event.presentation === 'reasoning') return 'Reasoning';
+  if (event.presentation === 'tool') return 'Tool activity';
+  return 'Session update';
+}
+
+function EventBody({ event }: { event: TranscriptItem }) {
+  if (event.presentation === 'diff' && event.diffData) {
+    return <div className="body"><SafeDiffView path={event.diffData.path} action={event.diffData.action} diff={event.diffData.diff} /></div>;
+  }
+  if (event.presentation === 'command' && event.commandData) {
+    return <div className="body"><SafeCommandView command={event.commandData.command} cwd={event.commandData.cwd} exitCode={event.commandData.exitCode} stdout={event.commandData.stdout} stderr={event.commandData.stderr} status={event.commandData.status} /></div>;
+  }
+  if (event.presentation === 'reasoning' && event.reasoningData) {
+    return <div className="body"><SafeReasoningView summary={event.reasoningData.summary} content={event.reasoningData.content} durationMs={event.reasoningData.durationMs} /></div>;
+  }
+  if (event.presentation === 'tool' && event.toolCallData) {
+    return <div className="body"><SafeToolView toolName={event.toolCallData.toolName} callId={event.toolCallData.callId} arguments={event.toolCallData.arguments} output={event.toolCallData.output} isError={event.toolCallData.isError} status={event.status} /></div>;
+  }
+  if (event.markdown !== null) {
+    return <div className="body"><p className="untrusted-label">{event.role === 'user' ? 'User input · untrusted' : 'Agent message · untrusted'}</p><UntrustedMarkdown source={event.markdown}/></div>;
+  }
+  if (event.presentation === 'approval') {
+    return <div className="body event-summary"><b>Approval requested</b><span>Pending decision</span>{event.approvalId ? <Link href={`#approval-${encodeURIComponent(event.approvalId)}`}>View approval card</Link> : null}</div>;
+  }
+  if (event.presentation === 'tool') {
+    return <div className="body event-summary"><b>Tool activity · untrusted action data</b><code>{event.summary}</code><span>{event.status}</span></div>;
+  }
+  return <p className="body event-raw-preview">{event.plain}</p>;
+}
+
 function SessionEvent({ event }: { event: TranscriptItem }) {
   const iso = activityTimestamp(event.occurredAtMs);
   if (event.presentation === 'lifecycle') return <article className="event event-lifecycle" data-kind={event.kind}>
@@ -78,21 +166,7 @@ function SessionEvent({ event }: { event: TranscriptItem }) {
     {event.rawEvents.length > 0 ? <Disclosure className="raw-event"><Heading><Button slot="trigger">Raw</Button></Heading><DisclosurePanel>{event.rawEvents.map((raw, index) => <pre key={index}>{raw}</pre>)}</DisclosurePanel></Disclosure> : null}
   </article>;
 
-  const roleLabel = event.role === 'user'
-    ? 'User prompt'
-    : event.presentation === 'message'
-      ? 'Agent message'
-      : event.presentation === 'approval'
-        ? 'Approval'
-        : event.presentation === 'diff'
-          ? 'Diff / File change'
-          : event.presentation === 'command'
-            ? 'Command execution'
-            : event.presentation === 'reasoning'
-              ? 'Reasoning'
-              : event.presentation === 'tool'
-                ? 'Tool activity'
-                : 'Session update';
+  const roleLabel = getRoleLabel(event);
 
   return <article className={`event event-${event.presentation}${event.role ? ` role-${event.role}` : ''}`} data-kind={event.kind}>
     <div className="meta">
@@ -101,64 +175,7 @@ function SessionEvent({ event }: { event: TranscriptItem }) {
       {iso ? <time dateTime={iso}>{new Date(event.occurredAtMs).toLocaleTimeString()}</time> : null}
     </div>
 
-    {event.presentation === 'diff' && event.diffData ? (
-      <div className="body">
-        <SafeDiffView
-          path={event.diffData.path}
-          action={event.diffData.action}
-          diff={event.diffData.diff}
-        />
-      </div>
-    ) : event.presentation === 'command' && event.commandData ? (
-      <div className="body">
-        <SafeCommandView
-          command={event.commandData.command}
-          cwd={event.commandData.cwd}
-          exitCode={event.commandData.exitCode}
-          stdout={event.commandData.stdout}
-          stderr={event.commandData.stderr}
-          status={event.commandData.status}
-        />
-      </div>
-    ) : event.presentation === 'reasoning' && event.reasoningData ? (
-      <div className="body">
-        <SafeReasoningView
-          summary={event.reasoningData.summary}
-          content={event.reasoningData.content}
-          durationMs={event.reasoningData.durationMs}
-        />
-      </div>
-    ) : event.presentation === 'tool' && event.toolCallData ? (
-      <div className="body">
-        <SafeToolView
-          toolName={event.toolCallData.toolName}
-          callId={event.toolCallData.callId}
-          arguments={event.toolCallData.arguments}
-          output={event.toolCallData.output}
-          isError={event.toolCallData.isError}
-          status={event.status}
-        />
-      </div>
-    ) : event.markdown !== null ? (
-      <div className="body">
-        <p className="untrusted-label">{event.role === 'user' ? 'User input · untrusted' : 'Agent message · untrusted'}</p>
-        <UntrustedMarkdown source={event.markdown}/>
-      </div>
-    ) : event.presentation === 'approval' ? (
-      <div className="body event-summary">
-        <b>Approval requested</b>
-        <span>Pending decision</span>
-        {event.approvalId ? <Link href={`#approval-${encodeURIComponent(event.approvalId)}`}>View approval card</Link> : null}
-      </div>
-    ) : event.presentation === 'tool' ? (
-      <div className="body event-summary">
-        <b>Tool activity · untrusted action data</b>
-        <code>{event.summary}</code>
-        <span>{event.status}</span>
-      </div>
-    ) : (
-      <p className="body event-raw-preview">{event.plain}</p>
-    )}
+    <EventBody event={event}></EventBody>
 
     {event.rawEvents.length > 0 ? (
       <Disclosure className="raw-event">
