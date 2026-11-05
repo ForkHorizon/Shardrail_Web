@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-gates_sha="4758f72d8f151b98949ca35d10e19e933100e2e3"
+gates_sha="33d79911955174b19aba9b44d27a78806ba71475"
 gates_root="${CI_SCOPE_GATES:-${HOME}/.ci-scope/gates}"
 if [[ ! -x "$gates_root/scripts/check" && -z "${CI_SCOPE_GATES:-}" ]]; then
   mkdir -p "$(dirname "$gates_root")"
@@ -8,7 +8,7 @@ if [[ ! -x "$gates_root/scripts/check" && -z "${CI_SCOPE_GATES:-}" ]]; then
   git -C "$gates_root" checkout --quiet "$gates_sha" >&2 || true
 fi
 if [[ ! -x "$gates_root/scripts/check" ]]; then
-  echo "ci-gates is missing at $gates_root. Run: git clone https://github.com/ForkHorizon/ci-gates \"$gates_root\" && git -C \"$gates_root\" checkout 4758f72d8f151b98949ca35d10e19e933100e2e3" >&2
+  echo "ci-gates is missing at $gates_root. Run: git clone https://github.com/ForkHorizon/ci-gates \"$gates_root\" && git -C \"$gates_root\" checkout 33d79911955174b19aba9b44d27a78806ba71475" >&2
   exit 2
 fi
 actual_sha="$(git -C "$gates_root" rev-parse HEAD)"
