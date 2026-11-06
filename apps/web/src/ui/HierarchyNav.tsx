@@ -124,6 +124,7 @@ export function HierarchyNav({
                     key={machine.id}
                     className={`selector-pill${active ? ' active' : ''}`}
                     aria-pressed={active}
+                    isDisabled={machine.isOnline === false}
                     onPress={() => onSelectMachine(machine.id)}
                   >
                     <span>{machine.name}</span>

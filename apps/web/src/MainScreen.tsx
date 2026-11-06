@@ -1,5 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from 'react-aria-components';
+import { discoverRelayMachines } from '@shardrail/client/browser';
+import { activeMachineId, defaultRelayUrl, isRelayEnvironment, setActiveMachineId } from './browser-pairing';
 import { approvalsForSession, checklistSummary, eventsForSession, hostBanner, sessionChecks, sessionSummaries, transcriptItems, type ApprovalBindingEcho } from './session-model';
 import { mergeDiscoveredSessions } from './discovered-session-model';
 import { connectionStatusLabel, type ConnectionPhase } from './browser-session';
@@ -61,6 +63,7 @@ export function MainScreen({
   const discoveredSessions = useDiscoveredSessions();
   const discoveredHistory = useDiscoveredHistory();
   const sessions = useMemo(() => mergeDiscoveredSessions(sessionSummaries(events), discoveredSessions), [events, discoveredSessions]);
+  const [availableMachines, setAvailableMachines] = useState<{ machine_id: string; online: boolean }[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [appliedCreateId, setAppliedCreateId] = useState<string | null>(null);
   const [appliedDismissId, setAppliedDismissId] = useState<string | null>(null);
@@ -74,11 +77,15 @@ export function MainScreen({
   const [pickedWorkdir, setPickedWorkdir] = useState('');
   const [confirmingAllowId, setConfirmingAllowId] = useState<string | null>(null);
   const [mobileDetail, setMobileDetail] = useState(false);
-  const [selectedMachineIdState, setSelectedMachineIdState] = useState<string | null>(propsSelectedMachineId ?? 'local');
+  const [selectedMachineIdState, setSelectedMachineIdState] = useState<string | null>(propsSelectedMachineId ?? activeMachineId() ?? 'local');
   const selectedMachineId = propsSelectedMachineId !== undefined ? propsSelectedMachineId : selectedMachineIdState;
   const handleSelectMachine = (id: string | null) => {
     setSelectedMachineIdState(id);
     if (onSelectMachine) onSelectMachine(id);
+    else if (id && id !== activeMachineId()) {
+      setActiveMachineId(id);
+      window.location.reload();
+    }
   };
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
 
@@ -89,10 +96,30 @@ export function MainScreen({
         sessionCount: m.sessionCount ?? sessions.filter((s) => s.machineId === m.id || (m.id === 'local' && (!s.machineId || s.machineId === 'local'))).length,
       }));
     }
+    if (availableMachines.length > 0) {
+      return availableMachines.map((machine) => ({
+        id: machine.machine_id,
+        // shortcut: relay discovery has no decryptable metadata yet; replace once the E2E channel exists.
+        name: `Machine ${machine.machine_id}`,
+        isOnline: machine.online,
+        sessionCount: sessions.filter((s) => s.machineId === machine.machine_id).length,
+      }));
+    }
     return [
       { id: 'local', name: 'Local Machine', isOnline: phase === 'connected', sessionCount: sessions.length }
     ];
-  }, [propsMachines, phase, sessions]);
+  }, [propsMachines, availableMachines, phase, sessions]);
+
+  useEffect(() => {
+    if (!isRelayEnvironment()) return;
+    let cancelled = false;
+    const refreshMachines = () => void discoverRelayMachines(defaultRelayUrl())
+      .then((machines) => { if (!cancelled) setAvailableMachines(machines); })
+      .catch(() => undefined);
+    refreshMachines();
+    const interval = window.setInterval(refreshMachines, 3000);
+    return () => { cancelled = true; window.clearInterval(interval); };
+  }, []);
 
   const machineFilteredSessions = useMemo(() => {
     if (!selectedMachineId || selectedMachineId === 'local' || machines.length <= 1) return sessions;
