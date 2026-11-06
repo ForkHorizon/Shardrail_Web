@@ -1,5 +1,12 @@
 import React, { Profiler, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { usePairingEffects } from './pairing-effects';
+import { useAppState } from './app-state';
+import { useBrowserSessionEffect } from './session-effects';
+import { useBrowserTransportEffect, useRequestRange } from './transport-effects';
+import type { AppState, AppStateBase } from './app-state';
+import { useBenchmarkEffects, type Tools } from './benchmark-effects';
+import { b4Enabled, b4Trace, started } from './run-context';
 import { listen } from '@tauri-apps/api/event';
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { Button, Input, Label, ListBox, ListBoxItem, Popover, Select, SelectValue, TextField } from 'react-aria-components';
@@ -17,13 +24,12 @@ import { connectBrowser, connectBrowserRelay, discoverRelayMachines, openBrowser
 import { createBrowserSession, createFlightOnControl, createFlightOnSessionCreated, isKeyChangedError, noteCreateSent, sessionWorkdirs, type BrowserSession, type ConnectionPhase, type CreateFlight, type CreateFlightResult } from './browser-session';
 import { approvalIdFromPayload, clearPromptOnAccept, controlFailureTarget, reduceApprovalFlight, type ApprovalBindingEcho, type ApprovalFlight, type ApprovalFlightAction } from './session-model';
 import { MainScreen } from './MainScreen';
+import { BrowserSessionScreen, PairingGate } from './app-screens';
 import { PairingScreen } from './screens/entry/PairingScreen';
 import './styles/index.css';
 
 type Metrics = { firstTranscriptRenderOpportunityMs: number; longTasks: number | null; maxLongTaskMs: number | null; frameP95: number | null; frameMax: number | null; frameSamples: number; commitCount: number; commitMs: number; eventStoreCount: number; generatedTokens: number; heapMB: number | null; mockCreationToMountedRowFollowupP95: number | null; composerP95: number | null; composerMin: number | null; composerMax: number | null; composerSamples: number; matchesByFirstFrame: number; firstFrameSamples: number; firstFrameDeltasMs: number[]; firstFrameRafTimestampDeltasMs: number[]; b4: { count: number; medianMs: number | null; p95Ms: number | null; maxMs: number | null; samplesMs: number[]; clockOffsetMs: number; clockUncertaintyMs: number }; daemonAgentChunkCount: number; userAgent: string };
-const started = performance.now();
 const browserMode = !('__TAURI_INTERNALS__' in window);
-const b4Enabled = new URLSearchParams(location.search).has('b4');
 const browserMain = browserMode && !b4Enabled;
 const desktopPairingApi: PairingApi = {
   inspect: () => invoke<PairingInfo>('pairing_info'),
@@ -31,9 +37,6 @@ const desktopPairingApi: PairingApi = {
   unpair: () => invoke('unpair_desktop'),
 };
 const pairingApi = browserMode ? browserPairingApi : desktopPairingApi;
-function b4Trace(stage: string, data: Record<string, unknown> = {}) {
-  if (b4Enabled) void invoke('b4_trace', { stage, data }).catch((error: unknown) => console.error('B4 trace command failed', error));
-}
 if (b4Enabled) {
   window.addEventListener('error', (event) => b4Trace('window.onerror', { message: event.message, source: event.filename, line: event.lineno, column: event.colno }));
   window.addEventListener('unhandledrejection', (event) => b4Trace('unhandledrejection', { reason: String(event.reason) }));
@@ -87,6 +90,96 @@ const Markdown = memo(({ source }: { rowId: number; source: string; contentHash:
   const content = <UntrustedMarkdown source={source}/>;
   return <iframe ref={frameRef} title="Agent-authored Markdown" sandbox="allow-same-origin" className="markdown-frame">{target ? createPortal(content, target) : null}</iframe>;
 }, sameMarkdownVersion);
+function useDaemonTransportEffect(state: AppStateBase, requestRange: ReturnType<typeof useRequestRange>) {
+  useEffect(() => {
+    if (!state.ready || (state.b4Enabled && (!state.autobench || !state.query.has('b4'))) || (!state.b4Enabled && state.pairing.kind !== 'paired') || state.browserMain || state.browserMode) return;
+    if (state.b4Enabled) {
+      const offsets: number[] = [];
+      for (let i = 0; i < 5; i++) { const before = performance.now(), wall = Date.now(), after = performance.now(); offsets.push(wall - (before + after) / 2); }
+      setDaemonClockMapping(offsets.reduce((a, b) => a + b, 0) / offsets.length, (Math.max(...offsets) - Math.min(...offsets)) / 2 + 1);
+    }
+    let unlistenStatus: (() => void) | undefined;
+    const channel = new Channel<{ version: number; total: number; agentChunkCount: number }>();
+    const removeChannel = coalesceChannelFrame(channel, (notice) => {
+      setDaemonTotal(notice.total, false);
+      setDaemonAgentChunkCount(notice.agentChunkCount);
+      if (isLiveTail()) {
+        state.rangeRequest.current.key = '';
+        const size = liveTailWindowSize(state.b4Enabled);
+        requestRange(Math.max(0, notice.total - size), size, notice.version);
+      } else {
+        setDaemonTotal(notice.total);
+        void invoke('acknowledge_stream_view', { version: notice.version }).catch((error: unknown) => state.setTransportStatus(`Stream acknowledgement failed: ${String(error)}`));
+      }
+    });
+    void listen<{ connected: boolean; error?: string }>('daemon-status', (event) => {
+      const status = event.payload;
+      b4Trace('daemon status received', status);
+      (window as Window & { __daemonConnected?: boolean }).__daemonConnected = status.connected;
+      if (status.connected) (window as Window & { __daemonConnectedOnce?: boolean }).__daemonConnectedOnce = true;
+      state.setTransportStatus(status.connected ? 'Connected · local shell relay' : status.error ? `Connection failed: ${status.error}` : 'Disconnected');
+    }).then((remove) => { unlistenStatus = remove; state.setTransportStatus('Frontend channel ready'); b4Trace('ready', { channel: 'daemon-frames', events: state.count });
+      return invoke(state.b4Enabled ? 'start_b4_relay' : 'start_paired_relay', { onFrames: channel, streams: Math.max(1, Math.min(8, state.streams)) });
+    }).catch((error: unknown) => {
+      if (state.b4Enabled) { state.setTransportStatus(`Connection failed: ${String(error)}`); b4Trace('relay setup rejected', { error: String(error) }); console.error('S5 channel setup failed', error); }
+      else { state.setTransportStatus('Connection failed · check daemon and pairing'); void state.pairingApi.inspect().then((info) => state.setPairing(stateFromInfo(info))).catch(() => undefined); }
+    });
+    return () => { unlistenStatus?.(); removeChannel(); };
+  }, [state.autobench, state.count, state.pairing.kind, state.query, state.ready, state.reconnect, requestRange, state.streams]);
+}
+
+async function runAutomation(state: AppStateBase, tools: Tools, cancelled: () => boolean) {
+  const query = state.query;
+  state.setBenchStatus('Automated run started');
+  b4Trace('automation started', { visibility: document.visibilityState, focused: document.hasFocus() });
+  if (!query.has('b4')) await typeComposer(state);
+  else b4Trace('B4 automation input skipped', { reason: 'synthetic composer input is outside the daemon-to-row measurement' });
+  if (state.autobench && shouldWaitForDaemonStream(query, state.count)) {
+    state.setBenchStatus('Waiting for shell relay and daemon fake-agent stream');
+    b4Trace('completion wait started', { expectedAgentChunks: state.count, connectedOnce: Boolean((window as Window & { __daemonConnectedOnce?: boolean }).__daemonConnectedOnce) });
+    await waitForDaemonStream(state.count, () => daemonAgentChunkCount, () => Boolean((window as Window & { __daemonConnectedOnce?: boolean }).__daemonConnectedOnce));
+    const minimumSamples = minimumB4Samples(state.count);
+    b4Trace('sample wait started', { expectedSamples: minimumSamples });
+    await waitForB4Samples(minimumSamples, () => daemonReceiptToRafMs.length);
+  }
+  b4Trace('completion condition evaluated', { expectedAgentChunks: state.count, frontendAgentChunks: daemonAgentChunkCount, expectedSamples: minimumB4Samples(state.count), samples: daemonReceiptToRafMs.length, connectedOnce: Boolean((window as Window & { __daemonConnectedOnce?: boolean }).__daemonConnectedOnce), rows: eventCount() });
+  const el = document.querySelector<HTMLElement>('.transcript')!;
+  if (!query.has('b4')) {
+    tools.startFrameSampling();
+    for (let step = 0; step < 60; step++) { el.scrollTop = (el.scrollTop + 14) % Math.max(1, el.scrollHeight - el.clientHeight); await new Promise((resolve) => setTimeout(resolve, 16)); }
+  }
+  if (state.autostart) await new Promise<void>((resolve) => { const wait = () => document.querySelector('footer')?.textContent?.includes('Streams running') ? window.setTimeout(wait, 50) : resolve(); wait(); });
+  tools.stopFrameSampling();
+  if (cancelled()) return;
+  b4Trace('rows committed', { rows: eventCount() });
+  const samples = tools.metrics();
+  b4Trace('samples collected', { count: samples.b4.count, daemonAgentChunkCount: samples.daemonAgentChunkCount });
+  const required = Math.ceil(state.streams * 75 * state.durationMs / 1000 * 0.5);
+  if (state.autostart && samples.generatedTokens < required) throw new Error(`Generated stream load ${samples.generatedTokens} < required ${required}`);
+  const scrollFrames = [...tools.observed.frames];
+  const result = { date: new Date().toISOString(), events: state.count, temperature: query.get('temperature') ?? 'unspecified', streams: state.streams, pageVisibility: document.visibilityState, pageFocused: document.hasFocus(), inputMethod: query.has('b4') ? 'not used for B4 daemon stream measurement' : 'Synthetic InputEvent dispatched to the focused composer', ...samples, scrollSmoothness: { frameP95Ms: percentile(scrollFrames, .95), frameMaxMs: Math.max(...scrollFrames), frames: scrollFrames.length } };
+  state.setBenchStatus('Saving results');
+  b4Trace('report fetch started', { url: 'http://127.0.0.1:5174/result', bodyBytes: JSON.stringify({ filename: state.runId, result }).length });
+  let response: Response;
+  try { response = await fetch('http://127.0.0.1:5174/result', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ filename: state.runId, result }) }); }
+  catch (error) { b4Trace('report fetch rejected', { error: String(error) }); throw error; }
+  b4Trace('report fetch resolved', { status: response.status, ok: response.ok });
+  if (!response.ok) throw new Error(`Result receiver returned HTTP ${response.status}`);
+  state.setBenchStatus('Results saved');
+}
+
+async function typeComposer(state: AppStateBase) {
+  await new Promise((resolve) => setTimeout(resolve, state.autostart ? 2200 : 600));
+  b4Trace('automation delay complete', { visibility: document.visibilityState, focused: document.hasFocus() });
+  const field = document.querySelector<HTMLInputElement>('input[aria-label="Message composer"]');
+  if (!field) throw new Error('Composer was not rendered');
+  field.focus();
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+  for (const char of '/s5-paint-responsiveness-trace') { setter?.call(field, field.value + char); field.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: char })); await new Promise((resolve) => setTimeout(resolve, 40)); }
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  b4Trace('automation input complete');
+}
+
 function Row({ row, onMount, onUnmount }: { row: ReturnType<typeof getRows>[number]; onMount: (id: number) => void; onUnmount: (id: number) => void }) {
   return <article ref={(node) => { if (row.id >= 1_000_000_000) { if (node) onMount(row.id); else onUnmount(row.id); } }} className={`event ${row.kind}`}><div className="meta"><b>Agent {row.agent + 1}</b><span>{row.kind === 'approval' ? 'approval requested' : row.kind === 'tool' ? 'tool call' : 'message'} · #{row.id}</span><time>{new Date().toLocaleTimeString()}</time></div>{row.kind === 'approval' ? <><pre>{row.command}</pre><div className="untrusted"><b>Agent’s description · untrusted</b><Markdown rowId={row.id} source={row.text} contentHash={row.contentHash} contentVersion={row.contentVersion}/></div><small>Checklist: sandbox not verified · approval routing not verified · containment not verified</small></> : row.kind === 'tool' ? <><pre>{row.command}</pre><small>{row.cwd}</small></> : <div className="body"><Markdown rowId={row.id} source={row.text} contentHash={row.contentHash} contentVersion={row.contentVersion}/></div>}</article>;
 }
@@ -125,22 +218,10 @@ function Transcript({ onInput, ready, requestRange }: { onInput: () => void; rea
   // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- scrollable transcript needs keyboard focus
   return <><div ref={parent} className="transcript" role="region" aria-label="Event transcript" tabIndex={0} onScroll={() => { followTail.current = parent.current !== null && parent.current.scrollHeight - parent.current.scrollTop - parent.current.clientHeight < 24; setLiveTail(followTail.current); onInput(); }}><div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>{virtualItems.map((v) => { const row = rows[v.index - getRowStart()]; return row ? <div key={row.id} data-index={v.index} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: 112, transform: `translateY(${v.start}px)` }}><Row row={row} onMount={(id) => mountedDaemonRows.current.add(id)} onUnmount={(id) => mountedDaemonRows.current.delete(id)}/></div> : null; })}</div></div></>;
 }
+
 function App() {
-  const query = useMemo(() => new URLSearchParams(location.search), []), count = Math.max(0, Number(query.get('events') ?? 5000)), streams = Number(query.get('streams') ?? 4), durationMs = Number(query.get('duration') ?? 15000), autostart = query.has('events') && query.get('autostart') !== '0', autobench = query.has('autobench'), runId = query.get('run') ?? `${count}-${streams}`, [ready, setReady] = useState(false), [draft, setDraft] = useState(''), [running, setRunning] = useState(false), [benchStatus, setBenchStatus] = useState(''), [transportStatus, setTransportStatus] = useState('Disconnected'), [pairing, setPairing] = useState<PairingState>({ kind: 'loading' }), [pairingBusy, setPairingBusy] = useState(false), [enrollmentCode, setEnrollmentCode] = useState(''), [fallbackAcknowledged, setFallbackAcknowledged] = useState(false), [reconnect, setReconnect] = useState(0), [connectionPhase, setConnectionPhase] = useState<ConnectionPhase>('connecting'), [approvalInFlight, setApprovalInFlight] = useState<ReadonlySet<string>>(() => new Set()), [approvalError, setApprovalError] = useState<string | null>(null), [promptError, setPromptError] = useState<string | null>(null);
-  const isRelay = isRelayEnvironment();
-  const [currentMachineId, setCurrentMachineId] = useState<string | null>(() => activeMachineId());
-  const [availableMachines, setAvailableMachines] = useState<{ machine_id: string; online: boolean }[]>([]);
-  const browserSession = useRef<BrowserSession | null>(null);
-  const approvalFlightRef = useRef<ApprovalFlight>({ inFlight: new Set(), error: null });
-  const pendingPromptRef = useRef<{ commandId: string; sessionId: string } | null>(null);
-  const createFlightRef = useRef<CreateFlight>({ pendingCommandId: null, acceptedCommandId: null });
-  const selectedCreateRef = useRef<string | null>(null);
-  const [promptClear, setPromptClear] = useState<{ commandId: string; sessionId: string } | null>(null);
-  const [sessionWorkdirsState, setSessionWorkdirs] = useState<readonly string[] | null>(null);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [createPending, setCreatePending] = useState(false);
-  const [createdSessionId, setCreatedSessionId] = useState<string | null>(null);
-  const [dismissedSessionId, setDismissedSessionId] = useState<string | null>(null);
+  const appState = useAppState(browserMain, b4Enabled, browserMode, pairingApi);
+  const { query, count, streams, durationMs, autostart, autobench, runId, ready, setReady, draft, setDraft, running, setRunning, benchStatus, setBenchStatus, transportStatus, setTransportStatus, pairing, setPairing, pairingBusy, setPairingBusy, enrollmentCode, setEnrollmentCode, fallbackAcknowledged, setFallbackAcknowledged, reconnect, setReconnect, connectionPhase, setConnectionPhase, approvalInFlight, setApprovalInFlight, approvalError, setApprovalError, promptError, setPromptError, isRelay, currentMachineId, setCurrentMachineId, availableMachines, setAvailableMachines, browserSession, approvalFlightRef, pendingPromptRef, createFlightRef, selectedCreateRef, promptClear, setPromptClear, sessionWorkdirsState, setSessionWorkdirs, createError, setCreateError, createPending, setCreatePending, createdSessionId, setCreatedSessionId, dismissedSessionId, setDismissedSessionId, runningRef, rangeRequest } = appState;
   const publishApprovalFlight = (action: ApprovalFlightAction) => {
     const next = reduceApprovalFlight(approvalFlightRef.current, action);
     if (next === approvalFlightRef.current) return;
@@ -148,371 +229,16 @@ function App() {
     setApprovalInFlight(next.inFlight);
     setApprovalError(next.error);
   };
+  const effectState = { ...appState, publishApprovalFlight };
   // Readiness gates the generator until the external store has been initialized.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { reset(browserMain ? 0 : count, streams, !b4Enabled && !browserMain); setDaemonAgentCount(streams); setReady(true); }, [count, streams]);
-  useEffect(() => {
-    if (b4Enabled) return;
-    void pairingApi.inspect().then((info) => setPairing(stateFromInfo(info))).catch((err) => {
-      const msg = err instanceof Error ? err.message : 'Could not read daemon identity. Check that the daemon is installed and retry.';
-      setPairing({ kind: 'error', message: msg });
-    });
-  }, []);
-  useEffect(() => {
-    if (b4Enabled || !isRelay || pairing.kind === 'paired') return;
-    let cancelled = false;
-    const relayUrl = defaultRelayUrl();
-    const pollMachines = async () => {
-      try {
-        const machines = await discoverRelayMachines(relayUrl);
-        if (cancelled) return;
-        setAvailableMachines(machines);
-        const online = machines.filter((m) => m.online);
-        if (online.length > 0) {
-          const chosen = (currentMachineId && online.some((m) => m.machine_id === currentMachineId))
-            ? currentMachineId
-            : online[0]!.machine_id;
-          const machineChanged = chosen !== currentMachineId;
-          if (machineChanged) {
-            setActiveMachineId(chosen);
-            setCurrentMachineId(chosen);
-          }
-          if (machineChanged || pairing.kind === 'error' || pairing.kind === 'loading') {
-            void pairingApi.inspect()
-              .then((next) => { if (!cancelled) setPairing(stateFromInfo(next)); })
-              .catch((err) => {
-                if (!cancelled) setPairing({ kind: 'error', message: err instanceof Error ? err.message : 'Could not read daemon identity.' });
-              });
-          }
-        } else {
-          setActiveMachineId(null);
-          setCurrentMachineId(null);
-          if (pairing.kind === 'loading' || pairing.kind === 'error') {
-            setPairing({ kind: 'error', message: 'Waiting for machine daemon to connect to relay...' });
-          }
-        }
-      } catch {
-        if (!cancelled && (pairing.kind === 'loading' || pairing.kind === 'error')) {
-          setPairing({ kind: 'error', message: 'Waiting for relay connection...' });
-        }
-      }
-    };
-    void pollMachines();
-    const interval = setInterval(pollMachines, 3000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [b4Enabled, isRelay, pairing.kind, currentMachineId]);
-  useEffect(() => {
-    if (pairing.kind !== 'confirming') return;
-    const timer = window.setTimeout(() => setPairing({ kind: 'expired', info: pairing.info }), Math.max(0, pairing.expiresAt - performance.now()));
-    return () => window.clearTimeout(timer);
-  }, [pairing]);
-  useEffect(() => {
-    if (!browserMode || pairing.kind !== 'paired' || pairing.info.keyStorage) return;
-    void pairingApi.inspect().then((info) => setPairing(stateFromInfo(info))).catch(() => undefined);
-  }, [pairing]);
-  useEffect(() => {
-    if (!browserMain || !ready || pairing.kind !== 'paired') return;
-    const info = pairing.info;
-    const holder: { current: BrowserSession | null } = { current: null };
-    let cancelled = false;
-    void (async () => {
-      try {
-        const identity = await (await openBrowserKeyStore()).get(info.daemonPublicKey);
-        if (cancelled) return;
-        if (!identity || !info.clientId) throw new Error('browser key is missing; pair this browser again');
-        const applyCreateFlight = (result: CreateFlightResult) => {
-          createFlightRef.current = result.flight;
-          setCreatePending(result.selectSessionId === null && (result.flight.pendingCommandId !== null || result.flight.acceptedCommandId !== null));
-          if (result.selectSessionId) {
-            selectedCreateRef.current = result.selectSessionId;
-            setCreatedSessionId(result.selectSessionId);
-          }
-          if (result.createError !== undefined) setCreateError(result.createError);
-          if (result.dismissSelection) {
-            setDismissedSessionId(selectedCreateRef.current);
-            selectedCreateRef.current = null;
-            setCreatedSessionId(null);
-          }
-        };
-        const relayUrl = isRelay ? defaultRelayUrl() : query.get('relay');
-        const machineId = isRelay ? (currentMachineId ?? activeMachineId()) : query.get('machine');
-        const session = createBrowserSession({
-          connect: relayUrl && machineId
-            ? (opts) => connectBrowserRelay({ relayUrl, machineId, identity: opts.identity, cursor: opts.cursor, journalEpoch: opts.journalEpoch })
-            : connectBrowser,
-          url: browserWebSocketUrl(),
-          identity,
-          // A new page replays the journal so the session list is complete. In-page reconnect uses the high-water cursor.
-          loadCursor: () => undefined,
-          saveCursor: () => undefined,
-          schedule: (delayMs, run) => {
-            const id = window.setTimeout(run, delayMs);
-            return () => window.clearTimeout(id);
-          },
-          online: () => navigator.onLine,
-          onEpoch: (epoch) => { observeJournalEpoch(epoch); },
-          onStatus: (phase) => {
-            setConnectionPhase(phase);
-            if (phase !== 'connected') publishApprovalFlight({ type: 'disconnect' });
-          },
-          onDurableEvent: (event) => {
-            applyDaemonEvent(event.cursor, { session_id: event.sessionId, kind: event.kind, payload: event.payload, occurred_at_ms: event.occurredAtMs }, null);
-            publishApprovalFlight({ type: 'journal', kind: event.kind, approvalId: approvalIdFromPayload(event.payload) });
-            if (event.kind !== 'session_created') return;
-            const commandId = event.payload && typeof event.payload === 'object' && 'command_id' in event.payload ? (event.payload as { command_id?: unknown }).command_id : null;
-            applyCreateFlight(createFlightOnSessionCreated(createFlightRef.current, typeof commandId === 'string' ? commandId : null, event.sessionId));
-          },
-          onControl: (frame) => {
-            const workdirs = sessionWorkdirs(frame);
-            if (workdirs) { setSessionWorkdirs(workdirs); return; }
-            const reduced = createFlightOnControl(createFlightRef.current, frame);
-            applyCreateFlight(reduced);
-            if (reduced.createError !== undefined) return;
-            if (frame.kind === 'approval_resolved') publishApprovalFlight({ type: 'resolved', approvalId: frame.approval_id });
-            if (frame.kind === 'command_accepted') {
-              const pending = pendingPromptRef.current;
-              if (clearPromptOnAccept(pending?.commandId ?? null, frame.command_id) && pending) {
-                setPromptClear(pending);
-                pendingPromptRef.current = null;
-              }
-              setPromptError(null);
-            }
-            const failure = controlFailureTarget(frame.kind, approvalFlightRef.current.inFlight.size);
-            if (failure === 'approval') publishApprovalFlight({ type: 'rejected' });
-            if (failure === 'prompt' && (frame.kind === 'error' || frame.kind === 'command_rejected')) {
-              if (frame.kind === 'command_rejected' && pendingPromptRef.current?.commandId === frame.command_id) pendingPromptRef.current = null;
-              setPromptError(frame.error);
-            }
-          },
-        });
-        if (cancelled) { session.stop(); return; }
-        holder.current = session;
-        browserSession.current = session;
-      } catch (error) {
-        if (!cancelled) setConnectionPhase(isKeyChangedError(error) ? 'key-changed' : 'reconnecting');
-      }
-    })();
-    const onOnline = () => holder.current?.setOnline(navigator.onLine);
-    const onOffline = () => holder.current?.setOnline(false);
-    window.addEventListener('online', onOnline);
-    window.addEventListener('offline', onOffline);
-    return () => {
-      cancelled = true;
-      holder.current?.stop();
-      if (browserSession.current === holder.current) browserSession.current = null;
-      window.removeEventListener('online', onOnline);
-      window.removeEventListener('offline', onOffline);
-    };
-  }, [ready, pairing, reconnect]);
-  const runningRef = useRef(false);
-  const rangeRequest = useRef<{ key: string; id: number; inFlight: boolean; pending?: { start: number; limit: number; noticeVersion?: number } }>({ key: '', id: 0, inFlight: false });
-  const requestRange = useCallback((start: number, limit: number, noticeVersion?: number) => {
-    if (!autobench) return;
-    const state = rangeRequest.current;
-    if (state.inFlight) {
-      const pendingNoticeVersion = noticeVersion ?? state.pending?.noticeVersion;
-      state.pending = pendingNoticeVersion === undefined ? { start, limit } : { start, limit, noticeVersion: pendingNoticeVersion };
-      return;
-    }
-    const issue = (requestedStart: number, requestedLimit: number, requestedNoticeVersion?: number) => {
-      const total = rowCount();
-      const { start: from, limit: size } = rangeForWindow(total, requestedStart, Math.max(32, requestedLimit), isLiveTail());
-      const key = `${from}:${size}:${total}`;
-      if (state.key === key) return;
-      state.key = key;
-      state.inFlight = true;
-      const id = ++state.id;
-      void invoke<{ start: number; total: number; version: number; agentChunkCount: number; rows: { cursor: number; event: { session_id: string; kind: string; payload: unknown }; receipt_wall_clock_ms?: number | null }[] }>('get_stream_window', { start: from, limit: size }).then((view) => {
-        setDaemonAgentChunkCount(view.agentChunkCount);
-        if (id === state.id && !state.pending) setDaemonWindow(view.start, view.total, view.rows, view.version);
-        else setDaemonTotal(view.total, false);
-        return requestedNoticeVersion === undefined ? undefined : invoke('acknowledge_stream_view', { version: requestedNoticeVersion });
-      }).catch((error: unknown) => { setTransportStatus(`Stream view failed: ${String(error)}`); b4Trace('window request failed', { error: String(error), start: from, limit: size }); }).finally(() => {
-        state.inFlight = false;
-        const next = state.pending;
-        delete state.pending;
-        if (next) { state.key = ''; issue(next.start, next.limit, next.noticeVersion); }
-      });
-    };
-    issue(start, limit, noticeVersion);
-  }, [autobench]);
-  useEffect(() => {
-    if (!ready || (b4Enabled && (!autobench || !query.has('b4'))) || (!b4Enabled && pairing.kind !== 'paired')) return;
-    if (browserMain) return;
-    if (browserMode) {
-      let client: Awaited<ReturnType<typeof connectBrowser>> | undefined;
-      let disposed = false;
-      void (async () => {
-        try {
-          const info = await pairingApi.inspect();
-          const identity = await (await openBrowserKeyStore()).get(info.daemonPublicKey);
-          if (!identity || !info.clientId) throw new Error('browser key is missing; pair this browser again');
-          const cursorKey = `shardrail-browser-cursor:${info.daemonPublicKey}`;
-          let cursor: number | undefined;
-          let journalEpoch: string | undefined;
-          try {
-            const saved = JSON.parse(localStorage.getItem(cursorKey) ?? 'null') as { cursor?: unknown; journalEpoch?: unknown } | null;
-            if (saved && Number.isSafeInteger(saved.cursor) && typeof saved.journalEpoch === 'string') {
-              cursor = saved.cursor as number;
-              journalEpoch = saved.journalEpoch;
-            }
-          } catch { /* Ignore corrupt cursor state and replay from the beginning. */ }
-          const relayParam = query.get('relay');
-          const machineParam = query.get('machine');
-          client = relayParam && machineParam
-            ? await connectBrowserRelay({ relayUrl: relayParam, machineId: machineParam, identity, cursor, journalEpoch })
-            : await connectBrowser({ url: browserWebSocketUrl(), identity, cursor, journalEpoch });
-          if (disposed) { client.close(); return; }
-          client.onFrame((frame) => {
-            if (frame.kind === 'durable_event') {
-              applyDaemonEvent(frame.cursor, { session_id: frame.event.session_id, kind: frame.event.kind, payload: frame.event.payload }, frame.receipt_wall_clock_ms);
-              try { localStorage.setItem(cursorKey, JSON.stringify({ cursor: frame.cursor, journalEpoch: client?.host.journal_epoch ?? '' })); } catch (error) { console.warn('Could not persist browser event cursor', error); }
-            }
-          });
-          client.onError((error) => setTransportStatus(`Connection failed: ${error.message}`));
-          setTransportStatus('Connected · browser WebSocket');
-        } catch (error) {
-          setTransportStatus(`Connection failed: ${String(error)}`);
-          void pairingApi.inspect().then((info) => setPairing(stateFromInfo(info))).catch(() => undefined);
-        }
-      })();
-      return () => { disposed = true; client?.close(); };
-    }
-    if (b4Enabled) {
-      const offsets: number[] = [];
-      for (let i = 0; i < 5; i++) { const before = performance.now(), wall = Date.now(), after = performance.now(); offsets.push(wall - (before + after) / 2); }
-      setDaemonClockMapping(offsets.reduce((a, b) => a + b, 0) / offsets.length, (Math.max(...offsets) - Math.min(...offsets)) / 2 + 1);
-    }
-    let unlistenStatus: (() => void) | undefined;
-    const channel = new Channel<{ version: number; total: number; agentChunkCount: number }>();
-    const removeChannel = coalesceChannelFrame(channel, (notice) => {
-      const { total, agentChunkCount } = notice;
-      setDaemonTotal(total, false);
-      setDaemonAgentChunkCount(agentChunkCount);
-      if (isLiveTail()) {
-        rangeRequest.current.key = '';
-        const tailSize = liveTailWindowSize(b4Enabled);
-        requestRange(Math.max(0, total - tailSize), tailSize, notice.version);
-      } else {
-        setDaemonTotal(total);
-        void invoke('acknowledge_stream_view', { version: notice.version }).catch((error: unknown) => setTransportStatus(`Stream acknowledgement failed: ${String(error)}`));
-      }
-    });
-    void listen<{ connected: boolean; error?: string }>('daemon-status', (event) => {
-      const status = event.payload;
-      b4Trace('daemon status received', status);
-      (window as Window & { __daemonConnected?: boolean }).__daemonConnected = status.connected;
-      if (status.connected) (window as Window & { __daemonConnectedOnce?: boolean }).__daemonConnectedOnce = true;
-      setTransportStatus(status.connected ? 'Connected · local shell relay' : status.error ? `Connection failed: ${status.error}` : 'Disconnected');
-    }).then((remove) => { unlistenStatus = remove; setTransportStatus('Frontend channel ready'); b4Trace('ready', { channel: 'daemon-frames', events: count });
-      return invoke(b4Enabled ? 'start_b4_relay' : 'start_paired_relay', { onFrames: channel, streams: Math.max(1, Math.min(8, streams)) });
-    }).catch((error: unknown) => {
-      if (b4Enabled) {
-        setTransportStatus(`Connection failed: ${String(error)}`);
-        b4Trace('relay setup rejected', { error: String(error) });
-        console.error('S5 channel setup failed', error);
-      } else {
-        setTransportStatus('Connection failed · check daemon and pairing');
-        void pairingApi.inspect().then((info) => setPairing(stateFromInfo(info))).catch(() => undefined);
-      }
-    });
-    return () => { unlistenStatus?.(); removeChannel(); };
-  }, [autobench, count, pairing.kind, query, ready, reconnect, requestRange, streams]);
-  useLayoutEffect(() => {
-    const input = takeCommittedInput(pendingInputs, draft);
-    if (!input) return;
-    requestAnimationFrame((frameTime) => {
-      const preview = document.querySelector<HTMLElement>('.draft-preview');
-      const callbackTime = performance.now();
-      const firstFrame = matchedInFirstFrame(input.startedAt, frameTime, callbackTime, preview?.dataset.draft === input.draft, nominalFrameIntervalMs);
-      observed.inputs.push(firstFrame.delay);
-      observed.firstFrame.push(firstFrame.matched);
-      observed.firstFrameTimestamps.push(firstFrame.delay);
-      observed.rafTimestampDeltas.push(firstFrame.frameTimestampDelta);
-    });
-  }, [draft]);
-  useEffect(() => { if (!autostart || !ready) return; const id = setTimeout(() => startStreams(streams, durationMs, runningRef, setRunning), 1000); return () => clearTimeout(id); }, [ready, autostart, streams, durationMs]);
-  useEffect(() => {
-    b4Trace('automation effect evaluated', { ready, autobench, visibility: document.visibilityState, focused: document.hasFocus() });
-    if (!ready || !autobench) return;
-    let cancelled = false;
-    void (async () => {
-      setBenchStatus('Automated run started');
-      b4Trace('automation started', { visibility: document.visibilityState, focused: document.hasFocus() });
-      if (!query.has('b4')) {
-        await new Promise((resolve) => setTimeout(resolve, autostart ? 2200 : 600));
-        b4Trace('automation delay complete', { visibility: document.visibilityState, focused: document.hasFocus() });
-        const field = document.querySelector<HTMLInputElement>('input[aria-label="Message composer"]');
-        if (!field) throw new Error('Composer was not rendered');
-        field.focus();
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-        for (const char of '/s5-paint-responsiveness-trace') {
-          setter?.call(field, field.value + char);
-          field.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: char }));
-          await new Promise((resolve) => setTimeout(resolve, 40));
-        }
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        b4Trace('automation input complete');
-      } else {
-        b4Trace('B4 automation input skipped', { reason: 'synthetic composer input is outside the daemon-to-row measurement' });
-      }
-      if (autobench && shouldWaitForDaemonStream(query, count)) {
-        setBenchStatus('Waiting for shell relay and daemon fake-agent stream');
-        b4Trace('completion wait started', { expectedAgentChunks: count, connectedOnce: Boolean((window as Window & { __daemonConnectedOnce?: boolean }).__daemonConnectedOnce) });
-        await waitForDaemonStream(count, () => daemonAgentChunkCount, () => Boolean((window as Window & { __daemonConnectedOnce?: boolean }).__daemonConnectedOnce));
-        const minimumSamples = minimumB4Samples(count);
-        b4Trace('sample wait started', { expectedSamples: minimumSamples });
-        await waitForB4Samples(minimumSamples, () => daemonReceiptToRafMs.length);
-      }
-      b4Trace('completion condition evaluated', { expectedAgentChunks: count, frontendAgentChunks: daemonAgentChunkCount, expectedSamples: minimumB4Samples(count), samples: daemonReceiptToRafMs.length, connectedOnce: Boolean((window as Window & { __daemonConnectedOnce?: boolean }).__daemonConnectedOnce), rows: eventCount() });
-      const el = document.querySelector<HTMLElement>('.transcript')!;
-      if (!query.has('b4')) {
-        startFrameSampling();
-        for (let step = 0; step < 60; step++) {
-          el.scrollTop = (el.scrollTop + 14) % Math.max(1, el.scrollHeight - el.clientHeight);
-          await new Promise((resolve) => setTimeout(resolve, 16));
-        }
-      }
-      if (autostart) await new Promise<void>((resolve) => {
-        const waitForStreams = () => document.querySelector('footer')?.textContent?.includes('Streams running') ? window.setTimeout(waitForStreams, 50) : resolve();
-        waitForStreams();
-      });
-      stopFrameSampling();
-      if (cancelled) return;
-      b4Trace('rows committed', { rows: eventCount() });
-      const samples = metrics();
-      b4Trace('samples collected', { count: samples.b4.count, daemonAgentChunkCount: samples.daemonAgentChunkCount });
-      const requiredTokens = Math.ceil(streams * 75 * durationMs / 1000 * 0.5);
-      if (autostart && samples.generatedTokens < requiredTokens) throw new Error(`Generated stream load ${samples.generatedTokens} < required ${requiredTokens}`);
-      const scrollFrames = [...observed.frames];
-      const result = { date: new Date().toISOString(), events: count, temperature: query.get('temperature') ?? 'unspecified', streams, pageVisibility: document.visibilityState, pageFocused: document.hasFocus(), inputMethod: query.has('b4') ? 'not used for B4 daemon stream measurement' : 'Synthetic InputEvent dispatched to the focused composer', ...samples, scrollSmoothness: { frameP95Ms: percentile(scrollFrames, .95), frameMaxMs: Math.max(...scrollFrames), frames: scrollFrames.length } };
-      setBenchStatus('Saving results');
-      b4Trace('report fetch started', { url: 'http://127.0.0.1:5174/result', bodyBytes: JSON.stringify({ filename: runId, result }).length });
-      let response: Response;
-      try {
-        response = await fetch('http://127.0.0.1:5174/result', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ filename: runId, result }) });
-        b4Trace('report fetch resolved', { status: response.status, ok: response.ok });
-      } catch (error) {
-        b4Trace('report fetch rejected', { error: String(error) });
-        throw error;
-      }
-      if (!response.ok) throw new Error(`Result receiver returned HTTP ${response.status}`);
-      setBenchStatus('Results saved');
-    })().catch(async (error: unknown) => {
-      setBenchStatus(`Run failed: ${String(error)}`);
-      b4Trace('bench rejected', { error: String(error), frontendAgentChunks: daemonAgentChunkCount, samples: daemonReceiptToRafMs.length });
-      console.error('S5 automated run failed', error);
-      if (autobench) await fetch('http://127.0.0.1:5174/result', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ filename: runId, result: { error: String(error), events: count, streams, daemonAgentChunkCount, b4: { count: daemonReceiptToRafMs.length } } }),
-      }).catch(() => undefined);
-    });
-    return () => { cancelled = true; };
-  }, [ready, autostart, autobench, durationMs, count, streams, runId, query]);
+  usePairingEffects(effectState);
+  useBrowserSessionEffect(effectState);
+  const requestRange = useRequestRange(appState);
+  useBrowserTransportEffect(effectState);
+  useDaemonTransportEffect(effectState, requestRange);
+  useBenchmarkEffects(effectState, { observed, pendingInputs, metrics, startFrameSampling, stopFrameSampling, startStreams }, runAutomation);
   function profiler(_: string, __: string, duration: number) { observed.commits++; observed.commitMs += duration; }
   function handleInput(event: React.ChangeEvent<HTMLInputElement>) {
     const value = event.currentTarget.value;
@@ -521,89 +247,8 @@ function App() {
   }
   function updateQuery(key: string, value: string) { const u = new URL(location.href); u.searchParams.set(key, value); window.location.assign(u.toString()); }
   const select = (label: string, value: string, options: string[], onChange: (value: string) => void) => <Select aria-label={label} selectedKey={value} onSelectionChange={(key) => onChange(String(key))}><Label>{label}</Label><Button><SelectValue/><span aria-hidden="true">⌄</span></Button><Popover><ListBox>{options.map((option) => <ListBoxItem key={option} id={option}>{option}</ListBoxItem>)}</ListBox></Popover></Select>;
-  if (!b4Enabled && pairing.kind !== 'paired') {
-    const info = 'info' in pairing ? pairing.info : undefined;
-    const verify = () => { if (info) { setFallbackAcknowledged(false); setPairing(beginConfirmation(info)); } };
-    const refresh = () => {
-      setPairing({ kind: 'loading' });
-      void pairingApi.inspect().then((next) => setPairing(stateFromInfo(next))).catch((err) => {
-        setPairing({ kind: 'error', message: err instanceof Error ? err.message : 'Could not read daemon identity. Check that the daemon is available and retry.' });
-      });
-    };
-    const handleSelectMachine = (machineId: string) => {
-      setActiveMachineId(machineId);
-      setCurrentMachineId(machineId);
-      setPairing({ kind: 'loading' });
-      void pairingApi.inspect()
-        .then((next) => setPairing(stateFromInfo(next)))
-        .catch((err) => setPairing({ kind: 'error', message: err instanceof Error ? err.message : 'Could not read daemon identity.' }));
-    };
-    return (
-      <PairingScreen
-        state={pairing}
-        browserMode={browserMode}
-        busy={pairingBusy}
-        enrollmentCode={enrollmentCode}
-        fallbackAcknowledged={fallbackAcknowledged}
-        onCode={setEnrollmentCode}
-        onAcknowledge={setFallbackAcknowledged}
-        onReview={verify}
-        onRetry={refresh}
-        onPair={() => {
-          setPairingBusy(true);
-          void confirmPairing(pairing, pairingApi, undefined, enrollmentCode, fallbackAcknowledged).then(setPairing).finally(() => setPairingBusy(false));
-        }}
-        onCancel={() => {
-          setEnrollmentCode('');
-          setFallbackAcknowledged(false);
-          if (info) setPairing(stateFromInfo(info));
-        }}
-        onReset={() => {
-          void pairingApi.unpair().then(refresh);
-        }}
-        isRelay={isRelay}
-        machineId={currentMachineId}
-        availableMachines={availableMachines}
-        onSelectMachine={handleSelectMachine}
-      />
-    );
-  }
-  if (browserMain && pairing.kind === 'paired') {
-    const resolveApproval = (approvalId: string, optionId: string, binding: ApprovalBindingEcho) => {
-      const result = browserSession.current?.resolveApproval(approvalId, optionId, binding) ?? 'blocked';
-      publishApprovalFlight(result === 'sent' ? { type: 'sent', approvalId } : { type: 'blocked' });
-    };
-    const sendCommand = (kind: 'turn.start' | 'turn.interrupt' | 'session.resume', payload: Record<string, unknown>, blocked: string) => {
-      const commandId = crypto.randomUUID();
-      const result = browserSession.current?.request({
-        command_id: commandId,
-        kind,
-        payload,
-        expected_state: null,
-        expected_turn_id: null,
-      }) ?? 'blocked';
-      if (kind === 'turn.start' && result === 'sent' && typeof payload.session_id === 'string') {
-        pendingPromptRef.current = { commandId, sessionId: payload.session_id };
-      }
-      setPromptError(result === 'sent' ? null : blocked);
-    };
-    const keyStorage = pairing.info.keyStorage;
-    const createSession = (workdir: string) => {
-      const commandId = crypto.randomUUID();
-      const result = browserSession.current?.request({
-        command_id: commandId,
-        kind: 'session.create',
-        payload: { workdir },
-        expected_state: null,
-        expected_turn_id: null,
-      }) ?? 'blocked';
-      if (result !== 'sent') { setCreatePending(false); setCreateError('Not connected. The session was not created.'); return; }
-      createFlightRef.current = noteCreateSent(commandId);
-      setCreatePending(true);
-      setCreateError(null);
-    };
-    return <MainScreen phase={connectionPhase} {...(keyStorage ? { keyStorage } : {})} approvalInFlight={approvalInFlight} approvalError={approvalError} promptError={promptError} promptClear={promptClear} workdirs={sessionWorkdirsState} createError={createError} createPending={createPending} createdSessionId={createdSessionId} dismissedSessionId={dismissedSessionId} onReconnect={() => { if (browserSession.current) browserSession.current.reconnect(); else setReconnect((current) => current + 1); }} onUnpair={isRelay ? () => { void pairingApi.unpair().then(() => pairingApi.inspect()).then((next) => setPairing(stateFromInfo(next))); } : undefined} onResolveApproval={resolveApproval} onSendPrompt={(sessionId, prompt) => sendCommand('turn.start', { session_id: sessionId, prompt }, 'Not connected. The prompt was not sent.')} onInterrupt={(sessionId) => sendCommand('turn.interrupt', { session_id: sessionId }, 'Not connected. Interrupt was not sent.')} onTakeOver={(sessionId) => sendCommand('session.resume', { session_id: sessionId, take_over: true }, 'Not connected. Take over request was not sent.')} onCreateSession={createSession}/>;
-  }
+  if (!b4Enabled && pairing.kind !== 'paired') return <PairingGate state={effectState}/>;
+  if (browserMain && pairing.kind === 'paired') return <BrowserSessionScreen state={effectState}/>;
   return <main><header><div><h1>Shardrail · S5 UI load</h1><p>Mock content · no provider connections</p></div><div className="controls">{pairing.kind === 'paired' ? <><span className="paired-fingerprint" aria-label="Paired daemon fingerprint" title={pairing.info.fingerprint}>{pairing.info.fingerprint}</span><Button onPress={() => setReconnect((current) => current + 1)}>Reconnect</Button>{!browserMode ? <Button onPress={() => { void unpairClient(pairingApi).then(setPairing); }}>Unpair</Button> : null}</> : null}{select('Events', String(count), ['0', '5000', '50000'], (value) => updateQuery('events', value))}{select('Streams', String(streams), ['1', '4', '8'], (value) => updateQuery('streams', value))}<Button onPress={() => startStreams(streams, durationMs, runningRef, setRunning)}>Start mock streams</Button></div></header>{browserMode && pairing.kind === 'paired' && pairing.info.keyStorage === 'noble-fallback' ? <p role="note">This browser stores an extractable private key seed in IndexedDB because non-extractable WebCrypto is unavailable. Same-origin script can read it.</p> : null}<section className="status"><span>{ready ? `${eventCount().toLocaleString()} events loaded · ${streams} streams` : 'Loading'}</span><span>{transportStatus} · Metrics: window.__s5Metrics()</span></section><TextField className="composer"><Label>Message</Label><Input aria-label="Message composer" value={draft} placeholder="Type to measure input responsiveness" onChange={handleInput}/><output className="draft-preview" data-draft={draft} aria-live="polite">{draftPreview(draft)}</output></TextField><Profiler id="transcript" onRender={profiler}><Transcript ready={ready} onInput={() => {}} requestRange={requestRange}/></Profiler><footer>{benchStatus || 'Mock content only'} · {running ? 'Streams running' : 'Ready'}</footer></main>;
 }
 createRoot(document.getElementById('root')!).render(<App/>);
