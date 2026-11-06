@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { measureAfterPaint } from './metrics-utils';
 import { ingestJournalEvents, type JournalEvent } from './session-model';
+import { historyJournalEvents, type DiscoveredSession } from './discovered-session-model';
 import { hashContent } from './streaming-view';
 
 export type EventRow = { id: number; agent: number; kind: 'message' | 'tool' | 'approval'; text: string; contentHash: string; contentVersion: number; command: string; cwd: string; at: number };
@@ -67,8 +68,23 @@ let pendingJournal: JournalEvent[] = [];
 const pendingCursors = new Set<number>();
 let journalEpoch: string | null = null;
 let journalGeneration = 0;
+let discoveredSessions: DiscoveredSession[] = [];
+let discoveredHistory: Record<string, JournalEvent[]> = {};
+let requestHistory: ((sessionId: string) => void) | undefined;
 export const sessionJournalEvents = () => sessionEvents;
 export const useSessionJournalEvents = () => { useSyncExternalStore(subscribe, () => revision, () => revision); return sessionEvents; };
+export const useDiscoveredSessions = () => { useSyncExternalStore(subscribe, () => revision, () => revision); return discoveredSessions; };
+export const useDiscoveredHistory = () => { useSyncExternalStore(subscribe, () => revision, () => revision); return discoveredHistory; };
+export function applyDiscoveryFrame(frame: { kind: string; sessions?: DiscoveredSession[]; page?: Parameters<typeof historyJournalEvents>[0] }) {
+  if (frame.kind === 'session_list') discoveredSessions = frame.sessions ?? [];
+  if (frame.kind === 'session_history' && frame.page) {
+    const history = historyJournalEvents(frame.page);
+    discoveredHistory = { ...discoveredHistory, [frame.page.session_id]: history };
+  }
+  notify();
+}
+export function setHistoryRequester(requester: ((sessionId: string) => void) | undefined) { requestHistory = requester; }
+export function requestDiscoveredHistory(sessionId: string) { requestHistory?.(sessionId); }
 export function applyPendingUpdates(current: EventRow[], indexById: Map<number, number>, updates: EventRow[]) {
   if (!updates.length) return current;
   const next = [...current];
@@ -97,6 +113,9 @@ export function reset(count: number, streams: number, seedRows = true) {
   pendingCursors.clear();
   journalEpoch = null;
   journalGeneration += 1;
+  discoveredSessions = [];
+  discoveredHistory = {};
+  requestHistory = undefined;
   receivedAt.clear();
   scheduledLatency.clear();
   activeMessageByAgent.clear();

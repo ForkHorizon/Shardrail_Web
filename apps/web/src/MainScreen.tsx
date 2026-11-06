@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Button } from 'react-aria-components';
 import { approvalsForSession, checklistSummary, eventsForSession, hostBanner, sessionChecks, sessionSummaries, transcriptItems, type ApprovalBindingEcho } from './session-model';
+import { mergeDiscoveredSessions } from './discovered-session-model';
 import { connectionStatusLabel, type ConnectionPhase } from './browser-session';
-import { useSessionJournalEvents } from './store';
+import { requestDiscoveredHistory, useDiscoveredHistory, useDiscoveredSessions, useSessionJournalEvents } from './store';
 import { EntryArea } from './screens/entry/EntryArea';
 import { SessionArea } from './screens/session/SessionArea';
 import { ThemeToggle } from './ui/ThemeToggle';
@@ -57,7 +58,9 @@ export function MainScreen({
   onSelectMachine?: (id: string | null) => void;
 }) {
   const events = useSessionJournalEvents();
-  const sessions = useMemo(() => sessionSummaries(events), [events]);
+  const discoveredSessions = useDiscoveredSessions();
+  const discoveredHistory = useDiscoveredHistory();
+  const sessions = useMemo(() => mergeDiscoveredSessions(sessionSummaries(events), discoveredSessions), [events, discoveredSessions]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [appliedCreateId, setAppliedCreateId] = useState<string | null>(null);
   const [appliedDismissId, setAppliedDismissId] = useState<string | null>(null);
@@ -118,8 +121,6 @@ export function MainScreen({
   }, [machineFilteredSessions, selectedAgent]);
 
   const selected = sessions.find((session) => session.id === selectedId) ?? null;
-  const visible = useMemo(() => selected ? eventsForSession(events, selected.id) : [], [events, selected]);
-  const items = useMemo(() => transcriptItems(visible), [visible]);
   const approvals = useMemo(() => selected ? approvalsForSession(events, selected.id) : [], [events, selected]);
   const checks = useMemo(() => sessionChecks(events, selected?.id ?? ''), [events, selected]);
   const checklist = useMemo(() => checklistSummary(checks), [checks]);
@@ -128,10 +129,16 @@ export function MainScreen({
     setConfirmingAllowId(null);
     if (id) {
       setMobileDetail(true);
+      if (discoveredSessions.some((session) => session.session_id === id) && !events.some((event) => event.sessionId === id)) requestDiscoveredHistory(id);
     } else {
       setMobileDetail(false);
     }
   };
+  const selectedEvents = useMemo(() => selected && discoveredSessions.some((session) => session.session_id === selected.id) && !events.some((event) => event.sessionId === selected.id)
+    ? discoveredHistory[selected.id] ?? []
+    : selected ? eventsForSession(events, selected.id) : [], [selected, discoveredHistory, discoveredSessions, events]);
+  const selectedItems = useMemo(() => transcriptItems(selectedEvents), [selectedEvents]);
+  const items = selectedItems;
   return <main className="main-screen">
     <header className="app-header">
       <div className="brand"><Icon name="shardrail"/><div><h1>Shardrail</h1><p>Local sessions from the daemon journal</p></div></div>
@@ -165,7 +172,7 @@ export function MainScreen({
       <div className={`detail-pane${mobileDetail ? ' mobile-visible' : ''}`}>
         {selected ? <>
           <Button className="button-quiet mobile-back" onPress={() => setMobileDetail(false)}><Icon className="icon" name="back"/> Back to sessions</Button>
-          <SessionArea sessionId={selected.id} provider={selected.agentKind} status={selected.status} connected={phase === 'connected'} items={items} approvals={approvals} checklist={checklist} promptError={promptError} promptClear={promptClear} approvalInFlight={approvalInFlight} approvalError={approvalError} confirmingAllowId={confirmingAllowId} onConfirmAllow={setConfirmingAllowId} onResolve={onResolveApproval} onSendPrompt={onSendPrompt} onInterrupt={onInterrupt} onTakeOver={onTakeOver}/>
+          <SessionArea sessionId={selected.id} provider={selected.agentKind} status={selected.status} connected={phase === 'connected'} readOnly={discoveredSessions.some((session) => session.session_id === selected.id) && !events.some((event) => event.sessionId === selected.id)} items={items} approvals={approvals} checklist={checklist} promptError={promptError} promptClear={promptClear} approvalInFlight={approvalInFlight} approvalError={approvalError} confirmingAllowId={confirmingAllowId} onConfirmAllow={setConfirmingAllowId} onResolve={onResolveApproval} onSendPrompt={onSendPrompt} onInterrupt={onInterrupt} onTakeOver={onTakeOver}/>
         </> : <section className="session-detail empty-detail" aria-labelledby="events-heading"><h2 id="events-heading">Sessions</h2><EmptyState><span className="empty-mark"><Icon name="workspace"/></span><strong>{sessions.length === 0 ? 'No sessions yet.' : 'Select a session'}</strong><span>{sessions.length === 0 ? 'Create a session to start monitoring local agent activity.' : 'Choose a session from the list to view its activity, approvals, and verification checks.'}</span></EmptyState></section>}
       </div>
     </div>

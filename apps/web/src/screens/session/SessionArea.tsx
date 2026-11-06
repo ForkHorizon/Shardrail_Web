@@ -18,6 +18,7 @@ export function SessionArea({
   provider,
   status,
   connected,
+  readOnly = false,
   items,
   approvals,
   checklist,
@@ -41,6 +42,7 @@ export function SessionArea({
   provider: string | null;
   status: string;
   connected: boolean;
+  readOnly?: boolean;
   items: readonly TranscriptItem[];
   approvals: ReturnType<typeof approvalsForSession>;
   checklist: ReturnType<typeof checklistSummary>;
@@ -62,20 +64,17 @@ export function SessionArea({
 }) {
   const [viewMode, setViewMode] = useState<'chat' | 'terminal'>('chat');
   const pendingApproval = approvals.some((card) => card.state === 'pending');
+  const promptKey = 'prompt-' + sessionId + '-' + (promptClear && promptClearApplies(promptClear.sessionId, sessionId) ? promptClear.commandId : '');
   return <section className="session-detail" aria-labelledby="events-heading">
     <header className="session-heading">
       <div><p className="eyebrow">Session detail</p><h2 id="events-heading" title={sessionId}>Events for {sessionId.slice(0, 8)}</h2></div>
-      <div className="session-view-switcher" role="tablist" aria-label="Session view mode">
-        <ToggleButton className="view-toggle-btn" isSelected={viewMode === 'chat'} onChange={() => setViewMode('chat')}>
-          Chat
-        </ToggleButton>
-        <ToggleButton className="view-toggle-btn" isSelected={viewMode === 'terminal'} onChange={() => setViewMode('terminal')}>
-          Terminal
-        </ToggleButton>
-      </div>
+      {!readOnly ? <div className="session-view-switcher" role="tablist" aria-label="Session view mode">
+        <ToggleButton className="view-toggle-btn" isSelected={viewMode === 'chat'} onChange={() => setViewMode('chat')}>Chat</ToggleButton>
+        <ToggleButton className="view-toggle-btn" isSelected={viewMode === 'terminal'} onChange={() => setViewMode('terminal')}>Terminal</ToggleButton>
+      </div> : null}
       <dl className="session-facts"><div><dt>Provider</dt><dd>{provider ?? 'Unknown provider'}</dd></div><div><dt>Status</dt><dd><span className="status-dot" aria-hidden="true"/>{status}</dd></div></dl>
     </header>
-    {viewMode === 'terminal' ? (
+    {viewMode === 'terminal' && !readOnly ? (
       <TerminalView
         sessionId={sessionId}
         connected={connected}
@@ -89,7 +88,7 @@ export function SessionArea({
       <>
         {pendingApproval ? <Approvals cards={approvals} checklist={checklist} connected={connected} inFlight={approvalInFlight} error={approvalError} confirmingAllowId={confirmingAllowId} onConfirmAllow={onConfirmAllow} onResolve={onResolve}/> : null}
         <SessionTranscript key={sessionId} sessionId={sessionId} items={items} status={status}/>
-        <PromptBox key={`prompt-${sessionId}-${promptClear && promptClearApplies(promptClear.sessionId, sessionId) ? promptClear.commandId : ''}`} sessionId={sessionId} error={promptError} connected={connected} onSend={onSendPrompt} onInterrupt={onInterrupt} onTakeOver={onTakeOver}/>
+        <PromptBox key={promptKey} sessionId={sessionId} error={promptError} connected={connected} readOnly={readOnly} onSend={onSendPrompt} onInterrupt={onInterrupt} onTakeOver={onTakeOver}/>
         <VerificationChecklist checks={checklist.checks}/>
         {!pendingApproval ? <Approvals cards={approvals} checklist={checklist} connected={connected} inFlight={approvalInFlight} error={approvalError} confirmingAllowId={confirmingAllowId} onConfirmAllow={onConfirmAllow} onResolve={onResolve}/> : null}
       </>
@@ -186,17 +185,27 @@ function SessionEvent({ event }: { event: TranscriptItem }) {
   </article>;
 }
 
-function PromptBox({ sessionId, error, connected, onSend, onInterrupt, onTakeOver }: {
+function PromptBox({ sessionId, error, connected, readOnly, onSend, onInterrupt, onTakeOver }: {
   sessionId: string;
   error: string | null;
   connected: boolean;
+  readOnly: boolean;
   onSend: (sessionId: string, prompt: string) => void;
   onInterrupt: (sessionId: string) => void;
   onTakeOver?: ((sessionId: string) => void) | undefined;
 }) {
   const [text, setText] = useState('');
   const [confirmingTakeOver, setConfirmingTakeOver] = useState(false);
+  if (readOnly) return <p role="note">Viewing history from an existing local session. Sending messages and terminal controls are unavailable.</p>;
   const isLockedElsewhere = Boolean(error && error.toLowerCase().includes('active elsewhere'));
+  const confirmTakeOver = () => {
+    setConfirmingTakeOver(false);
+    if (onTakeOver) onTakeOver(sessionId);
+  };
+  const sendPrompt = () => {
+    const prompt = text.trim();
+    if (prompt) onSend(sessionId, prompt);
+  };
   return <section className="prompt" aria-labelledby="prompt-heading">
     <h2 id="prompt-heading">Prompt</h2>
     {error ? (
@@ -209,7 +218,7 @@ function PromptBox({ sessionId, error, connected, onSend, onInterrupt, onTakeOve
             ) : (
               <>
                 <span>Terminate other writer and resume here?</span>
-                <Button onPress={() => { setConfirmingTakeOver(false); onTakeOver(sessionId); }}>Confirm Take Over</Button>
+                <Button onPress={confirmTakeOver}>Confirm Take Over</Button>
                 <Button className="button-secondary" onPress={() => setConfirmingTakeOver(false)}>Cancel</Button>
               </>
             )}
@@ -221,7 +230,7 @@ function PromptBox({ sessionId, error, connected, onSend, onInterrupt, onTakeOve
     <TextArea id="session-prompt" value={text} onChange={(event) => setText(event.currentTarget.value)} placeholder="Write a prompt…"/>
     {text ? <Disclosure className="draft-preview"><Heading><Button slot="trigger">Draft preview</Button></Heading><DisclosurePanel><pre>{text}</pre></DisclosurePanel></Disclosure> : null}
     <div className="controls">
-      <Button isDisabled={!connected || text.trim() === ''} onPress={() => { const prompt = text.trim(); if (!prompt) return; onSend(sessionId, prompt); }}><Icon className="icon" name="send"/> Send prompt</Button>
+      <Button isDisabled={!connected || text.trim() === ''} onPress={sendPrompt}><Icon className="icon" name="send"/> Send prompt</Button>
       <Button className="button-secondary" isDisabled={!connected} onPress={() => onInterrupt(sessionId)}><Icon className="icon" name="interrupt"/> Interrupt</Button>
     </div>
     {!connected ? <p className="blocked-reason" role="status">Prompt and interrupt are unavailable while disconnected. Your draft stays here.</p> : null}
