@@ -15,3 +15,11 @@ test('shows a neutral session skeleton while the initial daemon connection is pe
   assert.match(html, /aria-label="Loading sessions"/);
   assert.doesNotMatch(html, /No sessions yet/);
 });
+
+test('offers Claude Code in the new session agent selector', () => {
+  const html = renderToStaticMarkup(createElement(EntryArea, {
+    sessions: [], events: [], selectedId: null, workdirs: ['/workspace'], pickedWorkdir: '/workspace', createError: null,
+    createPending: false, phase: 'connected', onSelect: () => {}, onPickWorkdir: () => {}, onCreateSession: () => {},
+  }));
+  assert.match(html, /Claude Code/);
+});
