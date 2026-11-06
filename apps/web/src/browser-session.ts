@@ -1,6 +1,7 @@
 import type { BrowserKeyRecord } from '@shardrail/client/browser';
 import type { ApprovalResolutionRequest, CommandRequest, DaemonFrame } from '@shardrail/contracts';
 import type { ApprovalBindingEcho, JournalEvent } from './session-model';
+import { applyDiscoveryFrame, setHistoryRequester } from './store';
 
 export type ConnectionPhase = 'connecting' | 'connected' | 'reconnecting' | 'offline' | 'key-changed';
 
@@ -130,163 +131,140 @@ export function cursorStorageKey(hostPublicKey: string) {
   return `shardrail-browser-cursor:${hostPublicKey}`;
 }
 
+type SessionRuntime = {
+  generation: number;
+  stopped: boolean;
+  attempt: number;
+  phase: ConnectionPhase;
+  active: SessionSocket | undefined;
+  cursor: StoredCursor | undefined;
+  highWater: number;
+  seen: Set<number>;
+  cancelTimer: (() => void) | undefined;
+};
+
+function setPhase(options: BrowserSessionOptions, state: SessionRuntime, phase: ConnectionPhase) {
+  state.phase = phase;
+  options.onStatus(phase);
+}
+
+function clearTimer(state: SessionRuntime) {
+  state.cancelTimer?.();
+  state.cancelTimer = undefined;
+}
+
+function remember(options: BrowserSessionOptions, state: SessionRuntime, epoch: string) {
+  const changed = state.cursor !== undefined && state.cursor.journalEpoch !== epoch;
+  if (!state.cursor || changed) { state.seen.clear(); state.highWater = -1; }
+  if (changed) state.cursor = undefined;
+  options.onEpoch(epoch);
+}
+
+function scheduleRetry(options: BrowserSessionOptions, state: SessionRuntime) {
+  if (state.stopped || state.phase === 'key-changed') return;
+  if (!options.online()) { setPhase(options, state, 'offline'); return; }
+  state.attempt += 1;
+  setPhase(options, state, 'reconnecting');
+  state.cancelTimer = options.schedule(reconnectDelayMs(state.attempt), () => { void openConnection(options, state, true); });
+}
+
+function handleFrame(options: BrowserSessionOptions, state: SessionRuntime, client: SessionSocket, token: number, frame: DaemonFrame) {
+  if (state.stopped || token !== state.generation) return;
+  if (frame.kind !== 'durable_event') {
+    const discoveryFrame = frame as unknown as { kind: string };
+    if (discoveryFrame.kind === 'session_list' || discoveryFrame.kind === 'session_history') applyDiscoveryFrame(discoveryFrame as Parameters<typeof applyDiscoveryFrame>[0]);
+    options.onControl(frame);
+    return;
+  }
+  const event = journalEvent(frame);
+  if (!event || state.seen.has(event.cursor)) return;
+  state.seen.add(event.cursor);
+  if (event.cursor > state.highWater) {
+    state.highWater = event.cursor;
+    state.cursor = { cursor: state.highWater, journalEpoch: client.host.journal_epoch };
+    options.saveCursor(state.highWater, client.host.journal_epoch);
+  }
+  options.onDurableEvent(event);
+}
+
+async function openConnection(options: BrowserSessionOptions, state: SessionRuntime, retrying: boolean) {
+  if (state.stopped) return;
+  clearTimer(state);
+  const token = ++state.generation;
+  state.active?.close();
+  state.active = undefined;
+  if (!options.online()) { setPhase(options, state, 'offline'); return; }
+  setPhase(options, state, retrying ? 'reconnecting' : 'connecting');
+  try {
+    const client = await options.connect({ url: options.url, identity: options.identity, ...(state.cursor ? { cursor: state.cursor.cursor, journalEpoch: state.cursor.journalEpoch } : {}) });
+    if (state.stopped || token !== state.generation) { client.close(); return; }
+    remember(options, state, client.host.journal_epoch);
+    state.active = client;
+    state.attempt = 0;
+    setHistoryRequester((sessionId) => {
+      if (state.active === client && state.phase === 'connected') client.request({ command_id: crypto.randomUUID(), kind: 'session.history', payload: { session_id: sessionId, limit: 100, direction: 'backward' }, expected_state: null, expected_turn_id: null });
+    });
+    client.onFrame((frame) => handleFrame(options, state, client, token, frame));
+    setPhase(options, state, 'connected');
+    client.request({ command_id: crypto.randomUUID(), kind: 'session.list', payload: {}, expected_state: null, expected_turn_id: null });
+    client.onError((error) => handleConnectionError(options, state, token, error));
+  } catch (error) {
+    handleConnectionError(options, state, token, error instanceof Error ? error : new Error(String(error)));
+  }
+}
+
+function handleConnectionError(options: BrowserSessionOptions, state: SessionRuntime, token: number, error: Error) {
+  if (state.stopped || token !== state.generation) return;
+  state.generation += 1;
+  state.active = undefined;
+  setHistoryRequester(undefined);
+  if (isKeyChangedError(error)) { setPhase(options, state, 'key-changed'); return; }
+  scheduleRetry(options, state);
+}
+
+function resolveApproval(state: SessionRuntime, approvalId: string, optionId: string, binding: ApprovalBindingEcho | null): 'sent' | 'blocked' {
+  if (state.stopped || state.phase !== 'connected' || !state.active || !approvalId || !optionId || !binding) return 'blocked';
+  if (!binding.sessionId || !binding.turnId || !binding.providerRequestId || !/^[0-9a-fA-F]{64}$/.test(binding.contentHash)) return 'blocked';
+  try {
+    state.active.resolveApproval({ approval_id: approvalId, option_id: optionId, content_hash: binding.contentHash, session_id: binding.sessionId, turn_id: binding.turnId, provider_request_id: binding.providerRequestId });
+    return 'sent';
+  } catch { return 'blocked'; }
+}
+
 export function createBrowserSession(options: BrowserSessionOptions): BrowserSession {
-  let generation = 0;
-  let stopped = false;
-  let attempt = 0;
-  let phase: ConnectionPhase = 'connecting';
-  let active: SessionSocket | undefined;
-  let cursor = options.loadCursor();
-  let highWater = cursor?.cursor ?? -1;
-  const seen = new Set<number>();
-  let cancelTimer: (() => void) | undefined;
-
-  const setPhase = (next: ConnectionPhase) => {
-    phase = next;
-    options.onStatus(next);
-  };
-  const clearTimer = () => {
-    cancelTimer?.();
-    cancelTimer = undefined;
-  };
-  const remember = (epoch: string) => {
-    const changed = cursor !== undefined && cursor.journalEpoch !== epoch;
-    if (!cursor || changed) {
-      seen.clear();
-      highWater = -1;
-    }
-    if (changed) cursor = undefined;
-    options.onEpoch(epoch);
-  };
-
-  async function open(retrying: boolean) {
-    if (stopped) return;
-    clearTimer();
-    const token = ++generation;
-    const previous = active;
-    active = undefined;
-    previous?.close();
-    if (!options.online()) {
-      setPhase('offline');
-      return;
-    }
-    setPhase(retrying ? 'reconnecting' : 'connecting');
-    try {
-      const saved = cursor;
-      const client = await options.connect({
-        url: options.url,
-        identity: options.identity,
-        ...(saved ? { cursor: saved.cursor, journalEpoch: saved.journalEpoch } : {}),
-      });
-      if (stopped || token !== generation) {
-        client.close();
-        return;
-      }
-      remember(client.host.journal_epoch);
-      active = client;
-      attempt = 0;
-      setPhase('connected');
-      client.onFrame((frame) => {
-        if (stopped || token !== generation) return;
-        if (frame.kind !== 'durable_event') {
-          options.onControl(frame);
-          return;
-        }
-        const event = journalEvent(frame);
-        if (!event || seen.has(event.cursor)) return;
-        seen.add(event.cursor);
-        if (event.cursor > highWater) {
-          highWater = event.cursor;
-          cursor = { cursor: highWater, journalEpoch: client.host.journal_epoch };
-          options.saveCursor(highWater, client.host.journal_epoch);
-        }
-        options.onDurableEvent(event);
-      });
-      client.onError((error) => {
-        if (stopped || token !== generation) return;
-        generation += 1;
-        active = undefined;
-        if (isKeyChangedError(error)) {
-          setPhase('key-changed');
-          return;
-        }
-        scheduleRetry();
-      });
-    } catch (error) {
-      if (stopped || token !== generation) return;
-      if (isKeyChangedError(error)) {
-        setPhase('key-changed');
-        return;
-      }
-      scheduleRetry();
-    }
-  }
-
-  function scheduleRetry() {
-    if (stopped || phase === 'key-changed') return;
-    if (!options.online()) {
-      setPhase('offline');
-      return;
-    }
-    attempt += 1;
-    setPhase('reconnecting');
-    cancelTimer = options.schedule(reconnectDelayMs(attempt), () => { void open(true); });
-  }
-
-  void open(false);
+  const cursor = options.loadCursor();
+  const state: SessionRuntime = { generation: 0, stopped: false, attempt: 0, phase: 'connecting', active: undefined, cursor, highWater: cursor?.cursor ?? -1, seen: new Set(), cancelTimer: undefined };
+  void openConnection(options, state, false);
   return {
     reconnect() {
-      if (stopped) return;
-      attempt = 0;
-      clearTimer();
-      void open(phase === 'connected' || phase === 'reconnecting' || phase === 'offline');
+      if (state.stopped) return;
+      state.attempt = 0;
+      clearTimer(state);
+      void openConnection(options, state, ['connected', 'reconnecting', 'offline'].includes(state.phase));
     },
     stop() {
-      stopped = true;
-      clearTimer();
-      generation += 1;
-      const previous = active;
-      active = undefined;
-      previous?.close();
+      state.stopped = true;
+      setHistoryRequester(undefined);
+      clearTimer(state);
+      state.generation += 1;
+      state.active?.close();
+      state.active = undefined;
     },
     setOnline(online) {
-      if (stopped || phase === 'key-changed') return;
+      if (state.stopped || state.phase === 'key-changed') return;
       if (!online) {
-        clearTimer();
-        generation += 1;
-        const previous = active;
-        active = undefined;
-        previous?.close();
-        setPhase('offline');
-        return;
-      }
-      if (phase === 'offline') void open(true);
+        clearTimer(state);
+        state.generation += 1;
+        state.active?.close();
+        state.active = undefined;
+        setHistoryRequester(undefined);
+        setPhase(options, state, 'offline');
+      } else if (state.phase === 'offline') void openConnection(options, state, true);
     },
-    resolveApproval(approvalId, optionId, binding) {
-      if (stopped || phase !== 'connected' || !active || !approvalId || !optionId || !binding) return 'blocked';
-      if (!binding.sessionId || !binding.turnId || !binding.providerRequestId || !/^[0-9a-fA-F]{64}$/.test(binding.contentHash)) return 'blocked';
-      try {
-        active.resolveApproval({
-          approval_id: approvalId,
-          option_id: optionId,
-          content_hash: binding.contentHash,
-          session_id: binding.sessionId,
-          turn_id: binding.turnId,
-          provider_request_id: binding.providerRequestId,
-        });
-        return 'sent';
-      } catch {
-        return 'blocked';
-      }
-    },
+    resolveApproval: (approvalId, optionId, binding) => resolveApproval(state, approvalId, optionId, binding),
     request(request) {
-      if (stopped || phase !== 'connected' || !active) return 'blocked';
-      try {
-        active.request(request);
-        return 'sent';
-      } catch {
-        return 'blocked';
-      }
+      if (state.stopped || state.phase !== 'connected' || !state.active) return 'blocked';
+      try { state.active.request(request); return 'sent'; } catch { return 'blocked'; }
     },
   };
 }
