@@ -290,8 +290,8 @@ Answer with evidence (commands, excerpts, version):
 - Acceptance: owner decision for each app. (Details: `docs/tasks/T5.2-desktop-apps.md`)
 
 **T5.3 Terminal access implementation** (per the T5.1 decision)
-- [ ] [D] PTY layer in the daemon, output streamed to the browser (terminal in the web), input, resize, reconnect, permission limits, replay of recent output on attach. (Architecture proposal: `docs/tasks/T5.3-terminal-access.md`)
-- [ ] [D] Link a terminal session to its agent session (stages 2–4) so the chat view and the terminal view show the same session.
+- [x] [D] PTY layer in the daemon, output streamed to the browser (terminal in the web), input, resize, reconnect, permission limits, replay of recent output on attach. (Architecture proposal: `docs/tasks/T5.3-terminal-access.md`; resize UI and reload reconnect remain deferred)
+- [ ] [D] Link a terminal session to its agent session (stages 2–4) so the chat view and the terminal view show the same session. (Deferred: current launch starts a fresh CLI process.)
 - [ ] [T] Long sessions, network breaks, several browsers attached at once, control sequences treated as untrusted input, large outputs.
 - [ ] [P] All three machines.
 - Acceptance: the owner can launch (or attach to) a Codex and a Claude Code terminal session from the web, type, close the browser, return, and continue. (Design note: `docs/tasks/T5.3-terminal-access.md`)

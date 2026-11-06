@@ -2,48 +2,62 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Input, TextField } from 'react-aria-components';
 import { parseAnsiSpans } from './ansi-sanitizer';
+import { requestTerminalCommand } from '../../browser-session';
 
 export interface TerminalProps {
   sessionId: string;
+  provider?: string | null;
   connected: boolean;
   output: string;
   exitCode: number | null;
   onSendInput: (data: string) => void;
   onResize?: (rows: number, cols: number) => void;
-  onAttach?: () => void;
   onClear?: () => void;
 }
 
 export function TerminalView({
   sessionId,
+  provider,
   connected,
   output,
   exitCode,
-  onSendInput,
-  onAttach,
   onClear,
 }: TerminalProps) {
   const [lineInput, setLineInput] = useState('');
+  const [stream, setStream] = useState({ output: '', exitCode: null as number | null });
   const screenRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const receive = (event: Event) => {
+      const frame = (event as CustomEvent<{ kind: string; session_id: string; data?: string; exit_code?: number | null }>).detail;
+      if (frame.session_id !== sessionId) return;
+      if (frame.kind === 'terminal_output') setStream((state) => ({ ...state, output: (state.output + (frame.data ?? '')).slice(-65536) }));
+      if (frame.kind === 'terminal_exited') setStream((state) => ({ ...state, exitCode: frame.exit_code ?? null }));
+    };
+    window.addEventListener('shardrail-terminal', receive);
+    return () => window.removeEventListener('shardrail-terminal', receive);
+  }, [sessionId]);
 
   useEffect(() => {
     if (screenRef.current) {
       screenRef.current.scrollTop = screenRef.current.scrollHeight;
     }
-  }, [output]);
+  }, [output, stream.output]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!lineInput && lineInput !== '') return;
-    onSendInput(lineInput + '\n');
+    requestTerminalCommand('terminal.input', sessionId, { data: lineInput + '\n' });
     setLineInput('');
   };
 
-  const handleInterrupt = () => onSendInput('\x03');
-  const handleEof = () => onSendInput('\x04');
-  const handleEnter = () => onSendInput('\r');
+  const handleInterrupt = () => requestTerminalCommand('terminal.input', sessionId, { data: '\x03' });
+  const handleEof = () => requestTerminalCommand('terminal.input', sessionId, { data: '\x04' });
+  const handleEnter = () => requestTerminalCommand('terminal.input', sessionId, { data: '\r' });
 
-  const spans = parseAnsiSpans(output);
+  const terminalOutput = stream.output || output;
+  const terminalExitCode = stream.exitCode ?? exitCode;
+  const spans = parseAnsiSpans(terminalOutput);
 
   return (
     <section className="terminal-view" aria-labelledby="terminal-heading">
@@ -54,16 +68,17 @@ export function TerminalView({
           <span className={`terminal-status-pill status-${connected ? 'online' : 'offline'}`}>
             {connected ? 'Connected' : 'Offline'}
           </span>
-          {exitCode !== null ? (
-            <span className="terminal-exit-tag">Process exited ({exitCode})</span>
+          {terminalExitCode !== null ? (
+            <span className="terminal-exit-tag">Process exited ({terminalExitCode})</span>
           ) : null}
         </div>
         <div className="terminal-actions">
-          {onAttach ? (
-            <Button className="button-secondary terminal-btn" onPress={onAttach}>
+          <Button className="button-primary terminal-btn" onPress={() => { setStream({ output: '', exitCode: null }); requestTerminalCommand('terminal.spawn', sessionId, { command: provider?.toLowerCase().includes('claude') ? 'claude' : 'codex', args: [] }); }}>Launch agent</Button>
+          {
+            <Button className="button-secondary terminal-btn" onPress={() => { setStream({ output: '', exitCode: null }); requestTerminalCommand('terminal.attach', sessionId); }}>
               Attach
             </Button>
-          ) : null}
+          }
           {onClear ? (
             <Button className="button-secondary terminal-btn" onPress={onClear}>
               Clear

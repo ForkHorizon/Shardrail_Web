@@ -77,11 +77,11 @@ export function SessionArea({
     {viewMode === 'terminal' && !readOnly ? (
       <TerminalView
         sessionId={sessionId}
+        provider={provider}
         connected={connected}
         output={terminalOutput ?? ''}
         exitCode={terminalExitCode ?? null}
         onSendInput={(data) => onSendTerminalInput?.(sessionId, data)}
-        onAttach={() => onAttachTerminal?.(sessionId)}
         onClear={() => onClearTerminal?.(sessionId)}>
       </TerminalView>
     ) : (
