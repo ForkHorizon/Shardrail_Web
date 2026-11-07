@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button, Disclosure, DisclosurePanel, Heading, Link, TextArea, ToggleButton } from 'react-aria-components';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { activityTimestamp, approvalsForSession, checklistSummary, promptClearApplies, revealHiddenCharacters, type ApprovalBindingEcho, type TranscriptItem, type VerificationCheck } from '../../session-model';
@@ -12,9 +12,15 @@ import { SafeCommandView } from '../../ui/SafeCommandView';
 import { SafeReasoningView } from '../../ui/SafeReasoningView';
 import { SafeToolView } from '../../ui/SafeToolView';
 import { TerminalView } from './TerminalView';
+import { activeMachineId } from '../../browser-pairing';
+import { browserTerminalStateStorage, persistTerminalView, restoreTerminalView } from '../../terminal-session-state';
+import { terminalResumeCommand } from '../../terminal-command';
+import { requestDiscoveredHistory } from '../../store';
+import { requestTerminalCommand } from '../../browser-session';
 
 export function SessionArea({
   sessionId,
+  machineId = activeMachineId() ?? 'local',
   provider,
   status,
   connected,
@@ -39,6 +45,7 @@ export function SessionArea({
   onClearTerminal,
 }: {
   sessionId: string;
+  machineId?: string;
   provider: string | null;
   status: string;
   connected: boolean;
@@ -62,22 +69,34 @@ export function SessionArea({
   onAttachTerminal?: (sessionId: string) => void;
   onClearTerminal?: (sessionId: string) => void;
 }) {
-  const [viewMode, setViewMode] = useState<'chat' | 'terminal'>('chat');
+  const [viewMode, setViewMode] = useState<'chat' | 'terminal'>(() => restoreTerminalView(browserTerminalStateStorage(), machineId, sessionId));
+  const chooseViewMode = (mode: 'chat' | 'terminal') => {
+    setViewMode(mode);
+    persistTerminalView(browserTerminalStateStorage(), machineId, sessionId, mode);
+  };
   const pendingApproval = approvals.some((card) => card.state === 'pending');
+  const terminalAvailable = terminalResumeCommand(provider, sessionId) !== null;
+  useEffect(() => {
+    if (!readOnly || !connected) return;
+    requestDiscoveredHistory(sessionId);
+    requestTerminalCommand('session.watch', sessionId);
+    return () => { requestTerminalCommand('session.unwatch', sessionId); };
+  }, [connected, readOnly, sessionId]);
   const promptKey = 'prompt-' + sessionId + '-' + (promptClear && promptClearApplies(promptClear.sessionId, sessionId) ? promptClear.commandId : '');
   return <section className="session-detail" aria-labelledby="events-heading">
     <header className="session-heading">
       <div><p className="eyebrow">Session detail</p><h2 id="events-heading" title={sessionId}>Events for {sessionId.slice(0, 8)}</h2></div>
-      {!readOnly ? <div className="session-view-switcher" role="tablist" aria-label="Session view mode">
-        <ToggleButton className="view-toggle-btn" isSelected={viewMode === 'chat'} onChange={() => setViewMode('chat')}>Chat</ToggleButton>
-        <ToggleButton className="view-toggle-btn" isSelected={viewMode === 'terminal'} onChange={() => setViewMode('terminal')}>Terminal</ToggleButton>
+      {(!readOnly || terminalAvailable) ? <div className="session-view-switcher" role="group" aria-label="Session view mode">
+        <ToggleButton className="view-toggle-btn" isSelected={viewMode === 'chat'} onChange={() => chooseViewMode('chat')}>Chat</ToggleButton>
+        {terminalAvailable ? <ToggleButton className="view-toggle-btn" isSelected={viewMode === 'terminal'} onChange={() => chooseViewMode('terminal')}>Terminal</ToggleButton> : null}
       </div> : null}
       <dl className="session-facts"><div><dt>Provider</dt><dd>{provider ?? 'Unknown provider'}</dd></div><div><dt>Status</dt><dd><span className="status-dot" aria-hidden="true"/>{status}</dd></div></dl>
     </header>
-    {viewMode === 'terminal' && !readOnly ? (
+    {viewMode === 'terminal' && terminalAvailable ? (
       <TerminalView
         sessionId={sessionId}
         provider={provider}
+        status={status}
         connected={connected}
         output={terminalOutput ?? ''}
         exitCode={terminalExitCode ?? null}
@@ -196,7 +215,7 @@ function PromptBox({ sessionId, error, connected, readOnly, onSend, onInterrupt,
 }) {
   const [text, setText] = useState('');
   const [confirmingTakeOver, setConfirmingTakeOver] = useState(false);
-  if (readOnly) return <p role="note">Viewing history from an existing local session. Sending messages and terminal controls are unavailable.</p>;
+  if (readOnly) return <p role="note">Viewing history from an existing local session. Resume it in Terminal to continue.</p>;
   const isLockedElsewhere = Boolean(error && error.toLowerCase().includes('active elsewhere'));
   const confirmTakeOver = () => {
     setConfirmingTakeOver(false);
@@ -312,11 +331,11 @@ export function AgentDescription({ title, description }: { title: string | null;
   const source = [title, description].filter(Boolean).join('\n\n');
   const long = source.length > 240;
   const [expanded, setExpanded] = useState(false);
-  return <section className="untrusted" aria-label="Agent’s description · untrusted">
+  return <div className="untrusted" role="group" aria-label="Agent’s description · untrusted">
     <p className="untrusted-label">Agent’s description · untrusted</p>
     {source ? <div className={`untrusted-content${long && !expanded ? ' clamped' : ''}`}><UntrustedMarkdown source={source}/></div> : <p className="description-empty">No description provided</p>}
     {long ? <ToggleButton className="description-toggle" isSelected={expanded} onChange={setExpanded}>{expanded ? 'Show less' : 'Show more'}</ToggleButton> : null}
-  </section>;
+  </div>;
 }
 
 function DisclosedAction({ card }: { card: ReturnType<typeof approvalsForSession>[number] }) {

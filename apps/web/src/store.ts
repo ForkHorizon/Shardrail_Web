@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { measureAfterPaint } from './metrics-utils';
 import { ingestJournalEvents, type JournalEvent } from './session-model';
-import { historyJournalEvents, type DiscoveredSession } from './discovered-session-model';
+import { historyJournalEvents, liveSessionEvent, type DiscoveredSession } from './discovered-session-model';
 import { hashContent } from './streaming-view';
 
 export type EventRow = { id: number; agent: number; kind: 'message' | 'tool' | 'approval'; text: string; contentHash: string; contentVersion: number; command: string; cwd: string; at: number };
@@ -75,13 +75,28 @@ export const sessionJournalEvents = () => sessionEvents;
 export const useSessionJournalEvents = () => { useSyncExternalStore(subscribe, () => revision, () => revision); return sessionEvents; };
 export const useDiscoveredSessions = () => { useSyncExternalStore(subscribe, () => revision, () => revision); return discoveredSessions; };
 export const useDiscoveredHistory = () => { useSyncExternalStore(subscribe, () => revision, () => revision); return discoveredHistory; };
-export function applyDiscoveryFrame(frame: { kind: string; sessions?: DiscoveredSession[]; page?: Parameters<typeof historyJournalEvents>[0] }) {
+export function applyDiscoveryFrame(frame: { kind: string; sessions?: DiscoveredSession[]; page?: Parameters<typeof historyJournalEvents>[0]; session_id?: string; event?: Record<string, unknown> }) {
   if (frame.kind === 'session_list') discoveredSessions = frame.sessions ?? [];
   if (frame.kind === 'session_history' && frame.page) {
     const history = historyJournalEvents(frame.page);
-    discoveredHistory = { ...discoveredHistory, [frame.page.session_id]: history };
+    discoveredHistory = { ...discoveredHistory, [frame.page.session_id]: mergeDiscoveredEvents(history, discoveredHistory[frame.page.session_id] ?? []) };
+  }
+  if (frame.kind === 'session_stream' && frame.session_id && frame.event) {
+    const previous = discoveredHistory[frame.session_id] ?? [];
+    const next = liveSessionEvent(frame.session_id, frame.event, previous.reduce((max, event) => Math.max(max, event.cursor), 0) + 1);
+    discoveredHistory = { ...discoveredHistory, [frame.session_id]: mergeDiscoveredEvents(previous, [next]) };
   }
   notify();
+}
+function mergeDiscoveredEvents(base: JournalEvent[], updates: JournalEvent[]) {
+  const events = [...base];
+  for (const update of updates) {
+    const id = update.payload && typeof update.payload === 'object' && 'item_id' in update.payload ? String((update.payload as { item_id: unknown }).item_id) : null;
+    const index = id === null ? -1 : events.findIndex((event) => event.payload && typeof event.payload === 'object' && 'item_id' in event.payload && String((event.payload as { item_id: unknown }).item_id) === id);
+    if (index < 0) events.push(update);
+    else events[index] = { ...update, cursor: events[index]!.cursor };
+  }
+  return events.sort((a, b) => a.cursor - b.cursor);
 }
 export function setHistoryRequester(requester: ((sessionId: string) => void) | undefined) { requestHistory = requester; }
 export function requestDiscoveredHistory(sessionId: string) { requestHistory?.(sessionId); }

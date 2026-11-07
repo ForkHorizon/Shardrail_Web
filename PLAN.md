@@ -290,14 +290,14 @@ Answer with evidence (commands, excerpts, version):
 - Acceptance: owner decision for each app. (Details: `docs/tasks/T5.2-desktop-apps.md`)
 
 **T5.3 Terminal access implementation** (per the T5.1 decision)
-- [x] [D] PTY layer in the daemon, output streamed to the browser (terminal in the web), input, resize, reconnect, permission limits, replay of recent output on attach. (Architecture proposal: `docs/tasks/T5.3-terminal-access.md`; resize UI and reload reconnect remain deferred)
-- [ ] [D] Link a terminal session to its agent session (stages 2–4) so the chat view and the terminal view show the same session. (Deferred: current launch starts a fresh CLI process.)
+- [x] [D] PTY layer in the daemon, output streamed to the browser (terminal in the web), input, resize, reconnect, permission limits, replay of recent output on attach. (Architecture and implementation: `docs/tasks/T5.3-terminal-access.md`; resize UI remains deferred)
+- [x] [D] Link the terminal to the selected Codex or Claude Code session by resuming its provider session ID. The CLI opens inside the daemon-managed PTY.
 - [ ] [T] Long sessions, network breaks, several browsers attached at once, control sequences treated as untrusted input, large outputs.
 - [ ] [P] All three machines.
 - Acceptance: the owner can launch (or attach to) a Codex and a Claude Code terminal session from the web, type, close the browser, return, and continue. (Design note: `docs/tasks/T5.3-terminal-access.md`)
 
 **T5.4 Desktop app access implementation** (per the T5.2 decision)
-- [ ] [D] Scope is defined by the findings: at minimum read and live sync; write only if there is a reliable method. (Architecture proposal: `docs/tasks/T5.4-desktop-apps.md`)
+- [x] [D] Codex and Claude Code local histories are readable and live-synced; continuation uses the managed CLI PTY. Antigravity is deferred because its official transcript record schema is undocumented. (Support matrix: `docs/tasks/T5.4-desktop-apps.md`)
 - [ ] [T] Scenario "I write in the app → I see it in Shardrail" and back, where possible; behavior when the app is closed or updated.
 - [ ] [P] All three machines.
 - Acceptance: documented per-app support level matching the owner decision. (Design note: `docs/tasks/T5.4-desktop-apps.md`)

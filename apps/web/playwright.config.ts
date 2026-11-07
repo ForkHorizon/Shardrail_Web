@@ -6,10 +6,11 @@ import { randomUUID } from 'node:crypto';
 const stateFile = process.env.SHARDRAIL_E2E_STATE ?? join(tmpdir(), `shardrail-browser-e2e-${randomUUID()}.json`);
 process.env.SHARDRAIL_E2E_STATE = stateFile;
 process.env.SHARDRAILD_BIN = process.env.SHARDRAILD_BIN ?? join(process.cwd(), '../../target/release/shardraild');
+process.env.CODEX_HOME = join(process.cwd(), 'tests/fixtures/codex');
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: ['browser-main-screen.spec.ts', 'browser-pairing.spec.ts', 'browser-new-session.spec.ts', 'browser-codex-navigation.spec.ts'],
+  testMatch: ['browser-main-screen.spec.ts', 'browser-pairing.spec.ts', 'browser-new-session.spec.ts', 'browser-codex-navigation.spec.ts', 'browser-terminal-reload.spec.ts'],
   fullyParallel: false,
   workers: 1,
   globalSetup: './tests/browser-e2e-setup.ts',

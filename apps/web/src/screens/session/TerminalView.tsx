@@ -3,10 +3,12 @@ import { useEffect, useRef, useState } from 'react';
 import { Button, Input, TextField } from 'react-aria-components';
 import { parseAnsiSpans } from './ansi-sanitizer';
 import { requestTerminalCommand } from '../../browser-session';
+import { sessionIsLocked, terminalResumeCommand } from '../../terminal-command';
 
 export interface TerminalProps {
   sessionId: string;
   provider?: string | null;
+  status: string;
   connected: boolean;
   output: string;
   exitCode: number | null;
@@ -18,6 +20,7 @@ export interface TerminalProps {
 export function TerminalView({
   sessionId,
   provider,
+  status,
   connected,
   output,
   exitCode,
@@ -39,6 +42,12 @@ export function TerminalView({
   }, [sessionId]);
 
   useEffect(() => {
+    if (!connected) return;
+    setStream({ output: '', exitCode: null });
+    requestTerminalCommand('terminal.attach', sessionId);
+  }, [connected, sessionId]);
+
+  useEffect(() => {
     if (screenRef.current) {
       screenRef.current.scrollTop = screenRef.current.scrollHeight;
     }
@@ -57,6 +66,8 @@ export function TerminalView({
 
   const terminalOutput = stream.output || output;
   const terminalExitCode = stream.exitCode ?? exitCode;
+  const resumeCommand = terminalResumeCommand(provider ?? null, sessionId);
+  const lockedElsewhere = sessionIsLocked(status);
   const spans = parseAnsiSpans(terminalOutput);
 
   return (
@@ -73,12 +84,7 @@ export function TerminalView({
           ) : null}
         </div>
         <div className="terminal-actions">
-          <Button className="button-primary terminal-btn" onPress={() => { setStream({ output: '', exitCode: null }); requestTerminalCommand('terminal.spawn', sessionId, { command: provider?.toLowerCase().includes('claude') ? 'claude' : 'codex', args: [] }); }}>Launch agent</Button>
-          {
-            <Button className="button-secondary terminal-btn" onPress={() => { setStream({ output: '', exitCode: null }); requestTerminalCommand('terminal.attach', sessionId); }}>
-              Attach
-            </Button>
-          }
+          {resumeCommand ? <Button className="button-primary terminal-btn" isDisabled={!connected || lockedElsewhere} onPress={() => { setStream({ output: '', exitCode: null }); requestTerminalCommand('terminal.spawn', sessionId, resumeCommand); }}>Resume session</Button> : null}
           {onClear ? (
             <Button className="button-secondary terminal-btn" onPress={onClear}>
               Clear
@@ -100,8 +106,9 @@ export function TerminalView({
         aria-label="Terminal output stream"
         tabIndex={0}
       >
+        {lockedElsewhere ? <p className="terminal-empty" role="status">This session is active in another writer. Close it or take it over before resuming here.</p> : null}
         {spans.length === 0 ? (
-          <span className="terminal-empty">Terminal ready. Type a command or attach to the agent process.</span>
+          <span className="terminal-empty">Terminal ready. Type a command or launch an agent.</span>
         ) : (
           <pre className="terminal-pre">
             {spans.map((span, idx) => (
