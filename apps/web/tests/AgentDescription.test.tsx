@@ -10,6 +10,7 @@ Object.assign(globalThis, { React });
 test('approval descriptions show empty state and clamp long untrusted text with a toggle', () => {
   const empty = renderToStaticMarkup(createElement(AgentDescription, { title: null, description: null }));
   assert.match(empty, /Agent’s description · untrusted/);
+  assert.match(empty, /role="group" aria-label="Agent’s description · untrusted"/);
   assert.match(empty, /No description provided/);
 
   const description = 'untrusted description '.repeat(20);

@@ -87,7 +87,7 @@ export class BrowserSessionController {
     if (this.stopped || token !== this.generation) return;
     if (frame.kind !== 'durable_event') {
       const control = frame as unknown as { kind: string };
-      if (control.kind === 'session_list' || control.kind === 'session_history') applyDiscoveryFrame(control as Parameters<typeof applyDiscoveryFrame>[0]);
+      if (control.kind === 'session_list' || control.kind === 'session_history' || control.kind === 'session_stream') applyDiscoveryFrame(control as Parameters<typeof applyDiscoveryFrame>[0]);
       if (control.kind === 'terminal_output' || control.kind === 'terminal_exited') window.dispatchEvent(new CustomEvent('shardrail-terminal', { detail: frame }));
       this.options.onControl(frame);
       return;

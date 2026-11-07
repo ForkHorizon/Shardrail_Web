@@ -54,3 +54,22 @@ export function historyJournalEvents(page: { session_id: string; turns: readonly
     return { cursor: ++cursor, sessionId: page.session_id, kind: eventKind, occurredAtMs: turn.started_at_ms, payload };
   }));
 }
+
+export function liveSessionEvent(sessionId: string, event: Record<string, unknown>, cursor: number): JournalEvent {
+  const kind = typeof event.event === 'string' ? event.event : 'system_notice';
+  const item = event.item && typeof event.item === 'object' ? event.item as Record<string, unknown> : null;
+  if (item) {
+    const itemKind = typeof item.kind === 'string' ? item.kind : 'system_notice';
+    const role = item.role === 'user' ? 'user' : 'assistant';
+    return {
+      cursor,
+      sessionId,
+      kind: itemKind === 'message' ? (role === 'user' ? 'user_message' : 'agent_message_chunk') : itemKind,
+      occurredAtMs: Date.now(),
+      payload: itemKind === 'message' ? { ...item, role, content: { text: item.text } } : item,
+    };
+  }
+  const payload = { ...event };
+  delete payload.event;
+  return { cursor, sessionId, kind, occurredAtMs: Number(event.started_at_ms ?? event.completed_at_ms ?? Date.now()), payload };
+}

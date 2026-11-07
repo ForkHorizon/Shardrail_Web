@@ -5,7 +5,7 @@ import { activeMachineId, defaultRelayUrl, isRelayEnvironment, setActiveMachineI
 import { approvalsForSession, checklistSummary, eventsForSession, hostBanner, sessionChecks, sessionSummaries, transcriptItems, type ApprovalBindingEcho } from './session-model';
 import { mergeDiscoveredSessions } from './discovered-session-model';
 import { connectionStatusLabel, type ConnectionPhase } from './browser-session';
-import { requestDiscoveredHistory, useDiscoveredHistory, useDiscoveredSessions, useSessionJournalEvents } from './store';
+import { useDiscoveredHistory, useDiscoveredSessions, useSessionJournalEvents } from './store';
 import { EntryArea } from './screens/entry/EntryArea';
 import { SessionArea } from './screens/session/SessionArea';
 import { ThemeToggle } from './ui/ThemeToggle';
@@ -13,6 +13,7 @@ import { Icon } from './ui/Icon';
 import { StatusPill } from './ui/StatusPill';
 import { EmptyState } from './ui/EmptyState';
 import { HierarchyNav, type MachineEntry } from './ui/HierarchyNav';
+import { persistSelectedSession, restoreSelectedSession, browserTerminalStateStorage } from './terminal-session-state';
 
 export function MainScreen({
   phase,
@@ -64,23 +65,30 @@ export function MainScreen({
   const discoveredHistory = useDiscoveredHistory();
   const sessions = useMemo(() => mergeDiscoveredSessions(sessionSummaries(events), discoveredSessions), [events, discoveredSessions]);
   const [availableMachines, setAvailableMachines] = useState<{ machine_id: string; online: boolean }[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [appliedCreateId, setAppliedCreateId] = useState<string | null>(null);
   const [appliedDismissId, setAppliedDismissId] = useState<string | null>(null);
-  let nextSelected = selectedId;
-  if (createdSessionId && createdSessionId !== appliedCreateId) { setAppliedCreateId(createdSessionId); nextSelected = createdSessionId; }
-  if (dismissedSessionId && dismissedSessionId !== appliedDismissId) {
-    setAppliedDismissId(dismissedSessionId);
-    if (nextSelected === dismissedSessionId) nextSelected = null;
-  }
-  if (nextSelected !== selectedId) setSelectedId(nextSelected);
   const [pickedWorkdir, setPickedWorkdir] = useState('');
   const [confirmingAllowId, setConfirmingAllowId] = useState<string | null>(null);
   const [mobileDetail, setMobileDetail] = useState(false);
   const [selectedMachineIdState, setSelectedMachineIdState] = useState<string | null>(propsSelectedMachineId ?? activeMachineId() ?? 'local');
   const selectedMachineId = propsSelectedMachineId !== undefined ? propsSelectedMachineId : selectedMachineIdState;
+  const storageMachineId = selectedMachineId ?? activeMachineId() ?? 'local';
+  const [selectedId, setSelectedId] = useState<string | null>(() => restoreSelectedSession(browserTerminalStateStorage(), storageMachineId));
+  useEffect(() => { persistSelectedSession(browserTerminalStateStorage(), storageMachineId, selectedId); }, [storageMachineId, selectedId]);
+  useEffect(() => { setMobileDetail(Boolean(selectedId)); }, [selectedId]);
+  useEffect(() => {
+    if (!createdSessionId || createdSessionId === appliedCreateId) return;
+    setAppliedCreateId(createdSessionId);
+    setSelectedId(createdSessionId);
+  }, [createdSessionId, appliedCreateId]);
+  useEffect(() => {
+    if (!dismissedSessionId || dismissedSessionId === appliedDismissId) return;
+    setAppliedDismissId(dismissedSessionId);
+    setSelectedId((current) => current === dismissedSessionId ? null : current);
+  }, [dismissedSessionId, appliedDismissId]);
   const handleSelectMachine = (id: string | null) => {
     setSelectedMachineIdState(id);
+    setSelectedId(id ? restoreSelectedSession(browserTerminalStateStorage(), id) : null);
     if (onSelectMachine) onSelectMachine(id);
     else if (id && id !== activeMachineId()) {
       setActiveMachineId(id);
@@ -156,7 +164,6 @@ export function MainScreen({
     setConfirmingAllowId(null);
     if (id) {
       setMobileDetail(true);
-      if (discoveredSessions.some((session) => session.session_id === id) && !events.some((event) => event.sessionId === id)) requestDiscoveredHistory(id);
     } else {
       setMobileDetail(false);
     }
@@ -199,7 +206,7 @@ export function MainScreen({
       <div className={`detail-pane${mobileDetail ? ' mobile-visible' : ''}`}>
         {selected ? <>
           <Button className="button-quiet mobile-back" onPress={() => setMobileDetail(false)}><Icon className="icon" name="back"/> Back to sessions</Button>
-          <SessionArea sessionId={selected.id} provider={selected.agentKind} status={selected.status} connected={phase === 'connected'} readOnly={discoveredSessions.some((session) => session.session_id === selected.id) && !events.some((event) => event.sessionId === selected.id)} items={items} approvals={approvals} checklist={checklist} promptError={promptError} promptClear={promptClear} approvalInFlight={approvalInFlight} approvalError={approvalError} confirmingAllowId={confirmingAllowId} onConfirmAllow={setConfirmingAllowId} onResolve={onResolveApproval} onSendPrompt={onSendPrompt} onInterrupt={onInterrupt} onTakeOver={onTakeOver}/>
+          <SessionArea key={`${storageMachineId}:${selected.id}`} machineId={storageMachineId} sessionId={selected.id} provider={selected.agentKind} status={selected.status} connected={phase === 'connected'} readOnly={discoveredSessions.some((session) => session.session_id === selected.id) && !events.some((event) => event.sessionId === selected.id)} items={items} approvals={approvals} checklist={checklist} promptError={promptError} promptClear={promptClear} approvalInFlight={approvalInFlight} approvalError={approvalError} confirmingAllowId={confirmingAllowId} onConfirmAllow={setConfirmingAllowId} onResolve={onResolveApproval} onSendPrompt={onSendPrompt} onInterrupt={onInterrupt} onTakeOver={onTakeOver}/>
         </> : <section className="session-detail empty-detail" aria-labelledby="events-heading"><h2 id="events-heading">Sessions</h2><EmptyState><span className="empty-mark"><Icon name="workspace"/></span><strong>{sessions.length === 0 ? 'No sessions yet.' : 'Select a session'}</strong><span>{sessions.length === 0 ? 'Create a session to start monitoring local agent activity.' : 'Choose a session from the list to view its activity, approvals, and verification checks.'}</span></EmptyState></section>}
       </div>
     </div>
